@@ -4,11 +4,11 @@ import React, { useState } from 'react';
 import { FolderPlus, Download, Plus, Eye, EyeOff, ChevronDown, ChevronUp, Tag, FileText, Users, MessageSquare, BarChart, FileSpreadsheet, Camera, CheckSquare, Save, Search, Printer, Pencil, Trash2, X } from 'lucide-react';
 import { collection, addDoc, getDocs, updateDoc, deleteDoc, doc } from 'firebase/firestore';
 import { db } from '../lib/firebase';
-import { generarExcel } from '../utils/excelGenerator';
+import { generarExcel, generarDiagnosticoTorreBuffer, generarMhosA0143Buffer } from '../utils/excelGenerator';
 import { generarPDF } from '../utils/pdfGenerator';
 import { generarPDFjsPDF } from '../utils/pdfGeneratorJsPDF';
 import ChatSystem from './ChatSystem';
-import { User, Section, Report, Message } from '../types';
+import { User, Section, Report, Message, ReportTorre } from '../types';
 
 interface AdminDashboardProps {
   sections: Section[];
@@ -26,6 +26,12 @@ export default function AdminDashboard({ sections, reports, messages, setMessage
   const currentTab = activeTab !== undefined ? activeTab : localActiveTab;
   const setCurrentTab = setActiveTab !== undefined ? setActiveTab : setLocalActiveTab;
   const [searchTerm, setSearchTerm] = useState<string>('');
+  const [editingReport, setEditingReport] = useState<(Report & Partial<ReportTorre>) | null>(null);
+
+  const handleEditReport = (report: Report) => {
+    setEditingReport(report as Report & Partial<ReportTorre>);
+    setCurrentTab('edit_report');
+  };
 
   const filteredReports = reports?.filter((r: Report) =>
     (r.serial && r.serial.toLowerCase().includes(searchTerm.toLowerCase())) ||
@@ -45,7 +51,7 @@ export default function AdminDashboard({ sections, reports, messages, setMessage
         <TabButton active={currentTab === 'secciones'} onClick={() => setCurrentTab('secciones')} icon={<FolderPlus />} label="Gestión Carpetas" />
         <TabButton active={currentTab === 'usuarios'} onClick={() => setCurrentTab('usuarios')} icon={<Users />} label="Cuentas Personal" />
         <TabButton active={currentTab === 'chat'} onClick={() => setCurrentTab('chat')} icon={<MessageSquare />} label="Chat Central" />
-        <TabButton active={currentTab === 'hacer_reporte' || currentTab === 'form'} onClick={() => setCurrentTab('hacer_reporte')} icon={<FileSpreadsheet />} label="Hacer Reporte" />
+        <TabButton active={currentTab === 'hacer_reporte' || currentTab === 'form' || currentTab === 'form_preventivo' || currentTab === 'form_diagnostico' || currentTab === 'edit_report'} onClick={() => setCurrentTab('hacer_reporte')} icon={<FileSpreadsheet />} label="Hacer Reporte" />
       </div>
 
       {/* Content card */}
@@ -100,7 +106,7 @@ export default function AdminDashboard({ sections, reports, messages, setMessage
                 {sections.map((section: Section) => {
                   const secReps = filteredReports?.filter((r: Report) => r.sectionId === section.id);
                   if (searchTerm && (secReps?.length || 0) === 0) return null;
-                  return <AccordionItem key={section.id} section={section} reports={secReps} />;
+                  return <AccordionItem key={section.id} section={section} reports={secReps} onEdit={handleEditReport} />;
                 })}
                 {searchTerm && (filteredReports?.length || 0) === 0 && (
                   <div
@@ -124,42 +130,54 @@ export default function AdminDashboard({ sections, reports, messages, setMessage
         {currentTab === 'hacer_reporte' && (
           <div className="flex flex-col items-center py-12 animate-in fade-in">
             <h2 className="text-3xl font-bold mb-2" style={{ color: 'var(--text-primary)' }}>Formato de Servicio (Admin)</h2>
-            <p className="text-sm mb-10" style={{ color: 'var(--text-secondary)' }}>Haz clic abajo para comenzar a llenar el reporte y generar el Excel.</p>
-            <div className="w-full max-w-md">
-              <button
-                onClick={() => setCurrentTab('form')}
-                className="w-full flex flex-col items-center justify-center p-10 rounded-3xl transition-all duration-200 hover:scale-[1.02]"
-                style={{
-                  backgroundColor: 'var(--bg-card)',
-                  border: '1px solid var(--border)',
-                  boxShadow: 'var(--shadow-md)',
-                }}
-                onMouseEnter={e => {
-                  (e.currentTarget as HTMLButtonElement).style.boxShadow = 'var(--shadow-lg)';
-                  (e.currentTarget as HTMLButtonElement).style.borderColor = 'var(--accent-border)';
-                }}
-                onMouseLeave={e => {
-                  (e.currentTarget as HTMLButtonElement).style.boxShadow = 'var(--shadow-md)';
-                  (e.currentTarget as HTMLButtonElement).style.borderColor = 'var(--border)';
-                }}
-              >
-                <div className="p-5 rounded-2xl mb-5" style={{ backgroundColor: 'var(--accent-light)' }}>
-                  <FileSpreadsheet className="w-12 h-12" style={{ color: 'var(--accent)' }} />
-                </div>
-                <span className="text-2xl font-bold mb-3" style={{ color: 'var(--text-primary)' }}>Reporte Preventivo</span>
-                <span
-                  className="text-xs font-semibold px-4 py-1.5 rounded-full"
-                  style={{ backgroundColor: 'var(--accent-light)', color: 'var(--accent)', border: '1px solid var(--accent-border)' }}
+            <p className="text-sm mb-10" style={{ color: 'var(--text-secondary)' }}>Selecciona el tipo de reporte para comenzar a llenarlo.</p>
+            <div className="w-full max-w-2xl grid grid-cols-1 md:grid-cols-2 gap-5">
+              {([
+                { tab: 'form_preventivo', label: 'Reporte Preventivo', accentVar: 'var(--accent)', lightVar: 'var(--accent-light)', borderVar: 'var(--accent-border)' },
+                { tab: 'form_diagnostico', label: 'Reporte de Diagnóstico', accentVar: 'var(--warning)', lightVar: 'var(--warning-light)', borderVar: 'var(--warning)' },
+              ] as const).map(({ tab, label, accentVar, lightVar, borderVar }) => (
+                <button
+                  key={tab}
+                  onClick={() => setCurrentTab(tab)}
+                  className="w-full flex flex-col items-center justify-center p-10 rounded-3xl transition-all duration-200 hover:scale-[1.02]"
+                  style={{ backgroundColor: 'var(--bg-card)', border: '1px solid var(--border)', boxShadow: 'var(--shadow-md)' }}
+                  onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.boxShadow = 'var(--shadow-lg)'; (e.currentTarget as HTMLButtonElement).style.borderColor = borderVar; }}
+                  onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.boxShadow = 'var(--shadow-md)'; (e.currentTarget as HTMLButtonElement).style.borderColor = 'var(--border)'; }}
                 >
-                  Automático a Excel
-                </span>
-              </button>
+                  <div className="p-5 rounded-2xl mb-5" style={{ backgroundColor: lightVar }}>
+                    <FileSpreadsheet className="w-12 h-12" style={{ color: accentVar }} />
+                  </div>
+                  <span className="text-2xl font-bold mb-3" style={{ color: 'var(--text-primary)' }}>{label}</span>
+                  <span className="text-xs font-semibold px-4 py-1.5 rounded-full" style={{ backgroundColor: lightVar, color: accentVar, border: `1px solid ${borderVar}` }}>
+                    Automático a Excel
+                  </span>
+                </button>
+              ))}
             </div>
           </div>
         )}
 
         {currentTab === 'form' && (
           <AdminJobWizard type="Preventivo" sections={sections} currentUser={currentUser} onCancel={() => setCurrentTab('hacer_reporte')} />
+        )}
+
+        {(currentTab === 'form_preventivo' || currentTab === 'form_diagnostico') && (
+          <TorreWizard
+            type={currentTab === 'form_preventivo' ? 'preventivo' : 'diagnostico'}
+            sections={sections}
+            currentUser={currentUser}
+            onCancel={() => setCurrentTab('hacer_reporte')}
+          />
+        )}
+
+        {currentTab === 'edit_report' && editingReport && (
+          <TorreWizard
+            type={editingReport.type === 'diagnostico' ? 'diagnostico' : 'preventivo'}
+            sections={sections}
+            currentUser={currentUser}
+            onCancel={() => { setEditingReport(null); setCurrentTab('buzon'); }}
+            initialData={editingReport}
+          />
         )}
       </div>
     </div>
@@ -190,7 +208,7 @@ function TabButton({ active, onClick, icon, label }: { active: boolean; onClick:
   );
 }
 
-function AccordionItem({ section, reports }: { section: Section; reports: Report[] }) {
+function AccordionItem({ section, reports, onEdit }: { section: Section; reports: Report[]; onEdit?: (r: Report) => void }) {
   const [isOpen, setIsOpen] = useState<boolean>(false);
 
   return (
@@ -278,6 +296,17 @@ function AccordionItem({ section, reports }: { section: Section; reports: Report
                   </div>
 
                   <div className="flex flex-col sm:flex-row gap-2 w-full md:w-auto">
+                    {onEdit && (
+                      <button
+                        onClick={() => onEdit(report)}
+                        className="flex-1 md:flex-none flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all duration-200"
+                        style={{ backgroundColor: 'var(--accent-light)', color: 'var(--accent)', border: '1px solid var(--accent-border)' }}
+                        onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.backgroundColor = 'var(--accent)'; (e.currentTarget as HTMLButtonElement).style.color = '#fff'; }}
+                        onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.backgroundColor = 'var(--accent-light)'; (e.currentTarget as HTMLButtonElement).style.color = 'var(--accent)'; }}
+                      >
+                        <Pencil className="w-4 h-4" /> Editar
+                      </button>
+                    )}
                     <button
                       onClick={() => generarExcel(report)}
                       className="flex-1 md:flex-none flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all duration-200"
@@ -819,6 +848,459 @@ function UserManager({ users }: { users: User[] }) {
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+// ─── Torre Wizard ─────────────────────────────────────────────────────────────
+
+type TorreFormData = {
+  sectionId: string;
+  serial: string;
+  date: string;
+  client: string;
+  direccion: string;
+  contrato: string;
+  partida: string;
+  subpartida: string;
+  tipoServicio: 'preventivo' | 'correctivo' | 'diagnostico' | 'garantia' | 'instalacion' | 'capacitacion';
+  equipo: string;
+  marca: string;
+  modelo: string;
+  numSerie: string;
+  ubicacion: string;
+  falla: string;
+  condiciones: string;
+  trabajos: string;
+  refacciones: string;
+  medicion: { equipo: string; marca: string; modelo: string; serie: string }[];
+  checklist1: boolean[];
+  checklist2: boolean[];
+  fotos: Record<string, string>;
+};
+
+function buildInitialTorre(init?: (Report & Partial<ReportTorre>)): TorreFormData {
+  const d = init as Record<string, unknown> | undefined;
+  return {
+    sectionId: (d?.sectionId as string) || '',
+    serial: (d?.serial as string) || '',
+    date: (d?.date as string) || new Date().toISOString().split('T')[0],
+    client: (d?.client as string) || '',
+    direccion: (d?.direccion as string) || '',
+    contrato: (d?.contrato as string) || '',
+    partida: (d?.partida as string) || '',
+    subpartida: (d?.subpartida as string) || '',
+    tipoServicio: (d?.tipoServicio as TorreFormData['tipoServicio']) || 'preventivo',
+    equipo: (d?.equipo as string) || '',
+    marca: (d?.marca as string) || '',
+    modelo: (d?.modelo as string) || '',
+    numSerie: (d?.numSerie as string) || '',
+    ubicacion: (d?.ubicacion as string) || '',
+    falla: (d?.falla as string) || '',
+    condiciones: (d?.condiciones as string) || '',
+    trabajos: (d?.trabajos as string) || (d?.description as string) || '',
+    refacciones: (d?.refacciones as string) || '',
+    medicion: (d?.medicion as TorreFormData['medicion']) || Array(6).fill(null).map(() => ({ equipo: '', marca: '', modelo: '', serie: '' })),
+    checklist1: (d?.checklist1 as boolean[]) || Array(18).fill(false),
+    checklist2: (d?.checklist2 as boolean[]) || Array(12).fill(false),
+    fotos: (d?.fotos as Record<string, string>) || {},
+  };
+}
+
+interface TorreWizardProps {
+  type: 'preventivo' | 'diagnostico';
+  sections: Section[];
+  currentUser: User;
+  onCancel: () => void;
+  initialData?: Report & Partial<ReportTorre>;
+}
+
+function TorreWizard({ type, sections, currentUser, onCancel, initialData }: TorreWizardProps) {
+  const [step, setStep] = useState(1);
+  const [isSaving, setIsSaving] = useState(false);
+  const [isGeneratingPDF, setIsGeneratingPDF] = useState(false);
+  const [sectionSearch, setSectionSearch] = useState('');
+  const [showSectionDropdown, setShowSectionDropdown] = useState(false);
+  const [fd, setFd] = useState<TorreFormData>(() => buildInitialTorre(initialData));
+
+  const upd = (k: keyof TorreFormData, v: unknown) => setFd(prev => ({ ...prev, [k]: v }));
+
+  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>, key: string) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = ev => {
+      const img = new Image();
+      img.onload = () => {
+        const MAX = 600;
+        let w = img.width, h = img.height;
+        if (w > h) { if (w > MAX) { h = h * MAX / w; w = MAX; } }
+        else { if (h > MAX) { w = w * MAX / h; h = MAX; } }
+        const canvas = document.createElement('canvas');
+        canvas.width = w; canvas.height = h;
+        canvas.getContext('2d')?.drawImage(img, 0, 0, w, h);
+        const b64 = canvas.toDataURL('image/jpeg', 0.6).split(',')[1];
+        setFd(prev => ({ ...prev, fotos: { ...prev.fotos, [key]: b64 } }));
+      };
+      if (typeof ev.target?.result === 'string') img.src = ev.target.result;
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleSave = async () => {
+    if (!fd.serial.trim()) return alert('El folio es obligatorio.');
+    if (!fd.client.trim()) return alert('El cliente es obligatorio.');
+    if (!fd.sectionId) return alert('Selecciona una carpeta.');
+    setIsSaving(true);
+    try {
+      const now = new Date().toISOString();
+      const docData = {
+        type, serial: fd.serial.trim().slice(0, 20),
+        date: fd.date, client: fd.client.trim().slice(0, 100),
+        direccion: fd.direccion.trim().slice(0, 150), contrato: fd.contrato.trim().slice(0, 50),
+        partida: fd.partida.trim().slice(0, 50), subpartida: fd.subpartida.trim().slice(0, 50),
+        tipoServicio: fd.tipoServicio,
+        equipo: fd.equipo.trim().slice(0, 50), marca: fd.marca.trim().slice(0, 50),
+        modelo: fd.modelo.trim().slice(0, 50), numSerie: fd.numSerie.trim().slice(0, 50),
+        ubicacion: fd.ubicacion.trim().slice(0, 50), falla: fd.falla.trim().slice(0, 200),
+        condiciones: fd.condiciones.trim().slice(0, 100), trabajos: fd.trabajos.trim().slice(0, 1698),
+        refacciones: fd.refacciones.trim().slice(0, 200),
+        medicion: fd.medicion, checklist1: fd.checklist1, checklist2: fd.checklist2,
+        fotos: fd.fotos, sectionId: fd.sectionId,
+        jobId: currentUser.id, jobName: currentUser.name || currentUser.username,
+        updatedAt: now,
+      };
+      if (initialData?.id) {
+        await updateDoc(doc(db, 'reports', initialData.id), docData);
+        alert('Reporte actualizado correctamente.');
+      } else {
+        await addDoc(collection(db, 'reports'), { ...docData, createdAt: now });
+        alert('Reporte guardado correctamente.');
+      }
+      onCancel();
+    } catch (_e) { alert('Error al guardar. Intenta de nuevo.'); }
+    setIsSaving(false);
+  };
+
+  const handleGenerarPDF = async () => {
+    if (!fd.serial.trim()) return alert('Ingresa el folio antes de generar el PDF.');
+    setIsGeneratingPDF(true);
+    try {
+      const bufferFn = type === 'diagnostico' ? generarDiagnosticoTorreBuffer : generarMhosA0143Buffer;
+      const excelBuffer = await bufferFn(fd);
+      const blob = new Blob([excelBuffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+      const form = new FormData();
+      form.append('file', blob, 'temp.xlsx');
+      alert('Generando PDF con LibreOffice… esto puede tomar unos segundos.');
+      const res = await fetch('/api/convert-to-pdf', { method: 'POST', body: form });
+      if (!res.ok) throw new Error('Conversión fallida');
+      const pdfBlob = await res.blob();
+      const url = URL.createObjectURL(pdfBlob);
+      const a = document.createElement('a');
+      a.href = url; a.download = `${fd.serial || 'reporte'}_Impresion.pdf`;
+      a.click(); URL.revokeObjectURL(url);
+    } catch (_e) { alert('Error al generar PDF.'); }
+    setIsGeneratingPDF(false);
+  };
+
+  const taStyle = { backgroundColor: 'var(--bg-secondary)', border: '1px solid var(--border)', color: 'var(--text-primary)' };
+  const inCls = 'w-full rounded-xl px-4 py-3 outline-none text-sm transition-all duration-200';
+  const lbl = 'block text-xs font-semibold uppercase tracking-wider mb-2';
+  const onFocus = (e: React.FocusEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => (e.currentTarget.style.borderColor = 'var(--accent)');
+  const onBlur = (e: React.FocusEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => (e.currentTarget.style.borderColor = 'var(--border)');
+
+  const stepLabels = type === 'preventivo'
+    ? ['Datos del Reporte', 'Checklists y Fotos']
+    : ['Datos del Reporte', 'Fotos'];
+
+  const isEditing = !!initialData?.id;
+  const titleLabel = type === 'preventivo' ? 'Reporte Preventivo (MHOS-A0143)' : 'Reporte de Diagnóstico';
+
+  return (
+    <div className="max-w-4xl mx-auto animate-in fade-in">
+      {/* Header */}
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-8 pb-5 gap-4" style={{ borderBottom: '1px solid var(--border)' }}>
+        <div>
+          <h2 className="text-2xl font-bold mb-3" style={{ color: 'var(--text-primary)' }}>
+            {isEditing ? `Editando: ${initialData?.serial}` : titleLabel}
+          </h2>
+          <div className="flex items-center gap-1">
+            {[1, 2].map(n => {
+              const done = step > n; const active = step === n;
+              return (
+                <div key={n} className="flex items-center gap-1">
+                  <div className="w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold transition-all duration-200"
+                    style={{ backgroundColor: done ? 'var(--success)' : active ? 'var(--accent)' : 'transparent', border: `2px solid ${done ? 'var(--success)' : active ? 'var(--accent)' : 'var(--border-strong)'}`, color: done || active ? '#fff' : 'var(--text-muted)' }}>
+                    {done ? <svg className="w-4 h-4" viewBox="0 0 16 16" fill="none"><path d="M3 8l4 4 6-7" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></svg> : n}
+                  </div>
+                  {n < 2 && <div className="w-10 h-0.5" style={{ backgroundColor: step > n ? 'var(--success)' : 'var(--border)' }} />}
+                </div>
+              );
+            })}
+            <span className="text-xs ml-2" style={{ color: 'var(--text-muted)' }}>{stepLabels[step - 1]}</span>
+          </div>
+        </div>
+        <button onClick={onCancel} className="text-sm font-semibold px-4 py-2 rounded-xl transition-all duration-200"
+          style={{ backgroundColor: 'var(--danger-light)', color: 'var(--danger)', border: '1px solid var(--danger)' }}
+          onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.backgroundColor = 'var(--danger)'; (e.currentTarget as HTMLButtonElement).style.color = '#fff'; }}
+          onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.backgroundColor = 'var(--danger-light)'; (e.currentTarget as HTMLButtonElement).style.color = 'var(--danger)'; }}>
+          Cancelar
+        </button>
+      </div>
+
+      {/* STEP 1 */}
+      {step === 1 && (
+        <div className="space-y-8">
+          {/* Carpeta */}
+          <div className="p-5 rounded-2xl" style={{ backgroundColor: 'var(--accent-light)', border: '1px solid var(--accent-border)' }}>
+            <label className="block text-sm font-bold mb-3 flex items-center gap-2" style={{ color: 'var(--accent)' }}>
+              <FolderPlus className="w-4 h-4" /> Carpeta (Obligatorio)
+            </label>
+            <div className="relative">
+              <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" style={{ color: 'var(--text-muted)' }} />
+              <input type="text"
+                value={showSectionDropdown ? sectionSearch : (sections.find(s => s.id === fd.sectionId)?.name || '')}
+                onChange={e => { setSectionSearch(e.target.value); setShowSectionDropdown(true); }}
+                onFocus={() => { setSectionSearch(''); setShowSectionDropdown(true); }}
+                onBlur={() => setTimeout(() => setShowSectionDropdown(false), 150)}
+                placeholder="Buscar carpeta..." className="w-full pl-9 pr-4 py-3 rounded-xl outline-none text-sm"
+                style={{ backgroundColor: 'var(--bg-card)', border: '1px solid var(--accent-border)', color: 'var(--text-primary)' }} />
+              {showSectionDropdown && (
+                <div className="absolute z-10 w-full mt-1 rounded-xl shadow-2xl max-h-48 overflow-y-auto" style={{ backgroundColor: 'var(--bg-card)', border: '1px solid var(--border)' }}>
+                  {sections.filter(s => s.name.toLowerCase().includes(sectionSearch.toLowerCase())).map(s => (
+                    <button key={s.id} type="button"
+                      onMouseDown={() => {
+                        setFd(prev => ({ ...prev, sectionId: s.id, client: s.client || prev.client, direccion: s.direccion || prev.direccion, contrato: s.contrato || prev.contrato, partida: s.partida || prev.partida, equipo: s.equipo || prev.equipo, marca: s.marca || prev.marca, modelo: s.modelo || prev.modelo, numSerie: s.numSerieEq || prev.numSerie, ubicacion: s.ubicacion || prev.ubicacion }));
+                        setSectionSearch(''); setShowSectionDropdown(false);
+                      }}
+                      className="w-full text-left px-4 py-3 text-sm font-medium transition-colors duration-200"
+                      style={{ backgroundColor: fd.sectionId === s.id ? 'var(--accent-light)' : 'transparent', color: fd.sectionId === s.id ? 'var(--accent)' : 'var(--text-primary)', borderBottom: '1px solid var(--border)' }}>
+                      <span className="block">{s.name}</span>
+                      {s.client && <span className="text-xs" style={{ color: 'var(--text-muted)' }}>{s.client}</span>}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Encabezado */}
+          <div>
+            <h3 className="font-bold pb-2 mb-4 text-lg" style={{ color: 'var(--text-primary)', borderBottom: '1px solid var(--border)' }}>Encabezado</h3>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label className={lbl} style={{ color: 'var(--text-muted)' }}>Folio / Orden de Servicio (Obligatorio, max 20)</label>
+                <input type="text" maxLength={20} value={fd.serial} onChange={e => upd('serial', e.target.value)} className={inCls} style={taStyle} onFocus={onFocus} onBlur={onBlur} placeholder="Ej. OS-2024-001" />
+              </div>
+              <div>
+                <label className={lbl} style={{ color: 'var(--text-muted)' }}>Fecha</label>
+                <input type="date" value={fd.date} onChange={e => upd('date', e.target.value)} className={inCls} style={taStyle} onFocus={onFocus} onBlur={onBlur} />
+              </div>
+              <div className="md:col-span-2">
+                <label className={lbl} style={{ color: 'var(--text-muted)' }}>Cliente (Obligatorio, max 100)</label>
+                <input type="text" maxLength={100} value={fd.client} onChange={e => upd('client', e.target.value)} className={inCls} style={taStyle} onFocus={onFocus} onBlur={onBlur} />
+              </div>
+              <div className="md:col-span-2">
+                <label className={lbl} style={{ color: 'var(--text-muted)' }}>Dirección (max 150)</label>
+                <input type="text" maxLength={150} value={fd.direccion} onChange={e => upd('direccion', e.target.value)} className={inCls} style={taStyle} onFocus={onFocus} onBlur={onBlur} />
+              </div>
+              <div>
+                <label className={lbl} style={{ color: 'var(--text-muted)' }}>N° Contrato (max 50)</label>
+                <input type="text" maxLength={50} value={fd.contrato} onChange={e => upd('contrato', e.target.value)} className={inCls} style={taStyle} onFocus={onFocus} onBlur={onBlur} />
+              </div>
+              <div>
+                <label className={lbl} style={{ color: 'var(--text-muted)' }}>Tipo de Servicio</label>
+                <select value={fd.tipoServicio} onChange={e => upd('tipoServicio', e.target.value as TorreFormData['tipoServicio'])} className={inCls + ' cursor-pointer'} style={taStyle} onFocus={onFocus} onBlur={onBlur}>
+                  <option value="preventivo">Preventivo</option>
+                  <option value="correctivo">Correctivo</option>
+                  <option value="garantia">Garantía</option>
+                  <option value="diagnostico">Diagnóstico</option>
+                  <option value="instalacion">Instalación</option>
+                  <option value="capacitacion">Capacitación</option>
+                </select>
+              </div>
+            </div>
+          </div>
+
+          {/* Equipo */}
+          <div>
+            <h3 className="font-bold pb-2 mb-4 text-lg" style={{ color: 'var(--text-primary)', borderBottom: '1px solid var(--border)' }}>Datos del Equipo</h3>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="md:col-span-2">
+                <label className={lbl} style={{ color: 'var(--text-muted)' }}>Equipo (max 50)</label>
+                <input type="text" maxLength={50} value={fd.equipo} onChange={e => upd('equipo', e.target.value)} className={inCls} style={taStyle} onFocus={onFocus} onBlur={onBlur} />
+              </div>
+              <div>
+                <label className={lbl} style={{ color: 'var(--text-muted)' }}>Marca (max 50)</label>
+                <input type="text" maxLength={50} value={fd.marca} onChange={e => upd('marca', e.target.value)} className={inCls} style={taStyle} onFocus={onFocus} onBlur={onBlur} />
+              </div>
+              <div>
+                <label className={lbl} style={{ color: 'var(--text-muted)' }}>Modelo (max 50)</label>
+                <input type="text" maxLength={50} value={fd.modelo} onChange={e => upd('modelo', e.target.value)} className={inCls} style={taStyle} onFocus={onFocus} onBlur={onBlur} />
+              </div>
+              <div>
+                <label className={lbl} style={{ color: 'var(--text-muted)' }}>Número de Serie (max 50)</label>
+                <input type="text" maxLength={50} value={fd.numSerie} onChange={e => upd('numSerie', e.target.value)} className={inCls} style={taStyle} onFocus={onFocus} onBlur={onBlur} />
+              </div>
+              <div>
+                <label className={lbl} style={{ color: 'var(--text-muted)' }}>Ubicación (max 50)</label>
+                <input type="text" maxLength={50} value={fd.ubicacion} onChange={e => upd('ubicacion', e.target.value)} className={inCls} style={taStyle} onFocus={onFocus} onBlur={onBlur} />
+              </div>
+            </div>
+          </div>
+
+          {/* Cuerpo */}
+          <div>
+            <h3 className="font-bold pb-2 mb-4 text-lg" style={{ color: 'var(--text-primary)', borderBottom: '1px solid var(--border)' }}>Reporte de Servicio</h3>
+            <div className="space-y-4">
+              <div>
+                <label className={lbl} style={{ color: 'var(--text-muted)' }}>Falla Reportada (max 200)</label>
+                <textarea rows={2} maxLength={200} value={fd.falla} onChange={e => upd('falla', e.target.value)} className="w-full rounded-xl p-3 text-sm outline-none transition-all duration-200" style={taStyle} onFocus={onFocus} onBlur={onBlur} />
+              </div>
+              <div>
+                <label className={lbl} style={{ color: 'var(--text-muted)' }}>Condiciones Iniciales (max 100)</label>
+                <textarea rows={2} maxLength={100} value={fd.condiciones} onChange={e => upd('condiciones', e.target.value)} className="w-full rounded-xl p-3 text-sm outline-none transition-all duration-200" style={taStyle} onFocus={onFocus} onBlur={onBlur} />
+              </div>
+              <div>
+                <label className={lbl} style={{ color: 'var(--text-muted)' }}>Descripción del Mantenimiento (max 1698)</label>
+                <textarea rows={5} maxLength={1698} value={fd.trabajos} onChange={e => upd('trabajos', e.target.value)} className="w-full rounded-xl p-3 text-sm outline-none transition-all duration-200" style={taStyle} onFocus={onFocus} onBlur={onBlur} />
+              </div>
+              <div>
+                <label className={lbl} style={{ color: 'var(--text-muted)' }}>Refacciones / Accesorios (max 200)</label>
+                <textarea rows={2} maxLength={200} value={fd.refacciones} onChange={e => upd('refacciones', e.target.value)} className="w-full rounded-xl p-3 text-sm outline-none transition-all duration-200" style={taStyle} onFocus={onFocus} onBlur={onBlur} />
+              </div>
+            </div>
+          </div>
+
+          {/* Medición */}
+          <div>
+            <h3 className="font-bold pb-2 mb-4 text-lg" style={{ color: 'var(--text-primary)', borderBottom: '1px solid var(--border)' }}>Equipo de Medición (hasta 6)</h3>
+            <div className="space-y-2">
+              {fd.medicion.map((med, i) => (
+                <div key={i} className="grid grid-cols-4 gap-2">
+                  {(['equipo', 'marca', 'modelo', 'serie'] as const).map(field => (
+                    <input key={field} type="text" placeholder={field === 'serie' ? 'N° Serie' : field.charAt(0).toUpperCase() + field.slice(1)} value={med[field]}
+                      onChange={e => { const nm = fd.medicion.map((m, idx) => idx === i ? { ...m, [field]: e.target.value } : m); upd('medicion', nm); }}
+                      className="rounded-lg px-3 py-2 text-xs outline-none transition-all duration-200" style={taStyle} onFocus={onFocus} onBlur={onBlur} />
+                  ))}
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* STEP 2 */}
+      {step === 2 && (
+        <div className="space-y-8">
+          {type === 'preventivo' && (
+            <>
+              {/* Checklist 1 */}
+              <div>
+                <h3 className="font-bold pb-2 mb-4 text-lg" style={{ color: 'var(--text-primary)', borderBottom: '1px solid var(--border)' }}>Check List 1 (18 actividades)</h3>
+                <div className="grid grid-cols-2 md:grid-cols-3 gap-2 p-4 rounded-2xl" style={{ backgroundColor: 'var(--bg-secondary)', border: '1px solid var(--border)' }}>
+                  {fd.checklist1.map((checked, i) => (
+                    <label key={i} className="flex items-center gap-2 p-2 rounded-lg cursor-pointer transition-all duration-200" style={{ border: '1px solid transparent' }}
+                      onMouseEnter={e => (e.currentTarget.style.borderColor = 'var(--border)')}
+                      onMouseLeave={e => (e.currentTarget.style.borderColor = 'transparent')}>
+                      <div className="relative shrink-0">
+                        <input type="checkbox" checked={checked} onChange={e => { const n = [...fd.checklist1]; n[i] = e.target.checked; upd('checklist1', n); }} className="sr-only" />
+                        <div className="w-5 h-5 rounded-md flex items-center justify-center transition-all duration-200"
+                          style={{ backgroundColor: checked ? 'var(--success)' : 'transparent', border: `2px solid ${checked ? 'var(--success)' : 'var(--border-strong)'}` }}>
+                          {checked && <svg className="w-3 h-3" viewBox="0 0 12 12" fill="none"><path d="M2 6l3 3 5-5" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></svg>}
+                        </div>
+                      </div>
+                      <span className="text-xs" style={{ color: checked ? 'var(--text-primary)' : 'var(--text-secondary)' }}>Actividad {i + 1}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+              {/* Checklist 2 */}
+              <div>
+                <h3 className="font-bold pb-2 mb-4 text-lg" style={{ color: 'var(--text-primary)', borderBottom: '1px solid var(--border)' }}>Check List 2 (12 actividades)</h3>
+                <div className="grid grid-cols-2 md:grid-cols-3 gap-2 p-4 rounded-2xl" style={{ backgroundColor: 'var(--bg-secondary)', border: '1px solid var(--border)' }}>
+                  {fd.checklist2.map((checked, i) => (
+                    <label key={i} className="flex items-center gap-2 p-2 rounded-lg cursor-pointer transition-all duration-200" style={{ border: '1px solid transparent' }}
+                      onMouseEnter={e => (e.currentTarget.style.borderColor = 'var(--border)')}
+                      onMouseLeave={e => (e.currentTarget.style.borderColor = 'transparent')}>
+                      <div className="relative shrink-0">
+                        <input type="checkbox" checked={checked} onChange={e => { const n = [...fd.checklist2]; n[i] = e.target.checked; upd('checklist2', n); }} className="sr-only" />
+                        <div className="w-5 h-5 rounded-md flex items-center justify-center transition-all duration-200"
+                          style={{ backgroundColor: checked ? 'var(--success)' : 'transparent', border: `2px solid ${checked ? 'var(--success)' : 'var(--border-strong)'}` }}>
+                          {checked && <svg className="w-3 h-3" viewBox="0 0 12 12" fill="none"><path d="M2 6l3 3 5-5" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></svg>}
+                        </div>
+                      </div>
+                      <span className="text-xs" style={{ color: checked ? 'var(--text-primary)' : 'var(--text-secondary)' }}>Actividad {i + 1}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+            </>
+          )}
+
+          {/* Fotos */}
+          <div>
+            <h3 className="font-bold pb-2 mb-4 text-lg" style={{ color: 'var(--text-primary)', borderBottom: '1px solid var(--border)' }}>Evidencia Fotográfica</h3>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              {(['antes1','antes2','antes3','durante1','durante2','despues1','despues2'] as const).map(key => (
+                <div key={key} className="relative h-32 border-2 border-dashed rounded-xl flex flex-col items-center justify-center transition-all duration-200"
+                  style={{ borderColor: fd.fotos[key] ? 'var(--success)' : 'var(--border)', backgroundColor: 'var(--bg-secondary)' }}>
+                  {fd.fotos[key] ? (
+                    <div className="flex flex-col items-center" style={{ color: 'var(--success)' }}>
+                      <div className="w-10 h-10 rounded-full flex items-center justify-center mb-1" style={{ backgroundColor: 'var(--success-light)' }}>
+                        <CheckSquare className="w-5 h-5" />
+                      </div>
+                      <span className="text-xs font-semibold">¡Lista!</span>
+                    </div>
+                  ) : (
+                    <div className="flex flex-col items-center" style={{ color: 'var(--text-muted)' }}>
+                      <div className="w-10 h-10 rounded-full flex items-center justify-center mb-1" style={{ backgroundColor: 'var(--bg-tertiary)', border: '1px solid var(--border)' }}>
+                        <Camera className="w-5 h-5" />
+                      </div>
+                      <span className="text-xs font-medium capitalize">{key.replace(/(\d)/, ' $1')}</span>
+                    </div>
+                  )}
+                  <input type="file" accept="image/*" onChange={e => handleImageUpload(e, key)} className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" />
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Action buttons */}
+          <div className="flex flex-col sm:flex-row gap-3 pt-4" style={{ borderTop: '1px solid var(--border)' }}>
+            <button onClick={handleSave} disabled={isSaving}
+              className="flex-1 py-4 rounded-xl font-bold flex items-center justify-center gap-2 transition-all duration-200"
+              style={{ backgroundColor: 'var(--success)', color: '#fff', opacity: isSaving ? 0.7 : 1 }}>
+              <Save className="w-5 h-5" /> {isSaving ? 'Guardando...' : isEditing ? 'Guardar Cambios' : 'Guardar en Firebase'}
+            </button>
+            <button onClick={handleGenerarPDF} disabled={isGeneratingPDF}
+              className="flex-1 py-4 rounded-xl font-bold flex items-center justify-center gap-2 transition-all duration-200"
+              style={{ backgroundColor: 'var(--danger-light)', color: 'var(--danger)', border: '1px solid var(--danger)', opacity: isGeneratingPDF ? 0.7 : 1 }}
+              onMouseEnter={e => { if (!isGeneratingPDF) { (e.currentTarget as HTMLButtonElement).style.backgroundColor = 'var(--danger)'; (e.currentTarget as HTMLButtonElement).style.color = '#fff'; } }}
+              onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.backgroundColor = 'var(--danger-light)'; (e.currentTarget as HTMLButtonElement).style.color = 'var(--danger)'; }}>
+              <Printer className="w-5 h-5" /> {isGeneratingPDF ? 'Generando...' : 'Generar PDF'}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Navigation */}
+      <div className="flex justify-between items-center pt-8 mt-8" style={{ borderTop: '1px solid var(--border)' }}>
+        <button onClick={() => setStep(step - 1)} disabled={step === 1}
+          className="px-6 py-3 rounded-xl font-semibold text-sm transition-all duration-200 disabled:opacity-0"
+          style={{ backgroundColor: 'var(--bg-secondary)', color: 'var(--text-secondary)', border: '1px solid var(--border)' }}>
+          Atrás
+        </button>
+        {step < 2 && (
+          <button onClick={() => setStep(2)}
+            className="px-8 py-3 rounded-xl font-bold text-sm transition-all duration-200"
+            style={{ backgroundColor: 'var(--accent)', color: '#fff' }}
+            onMouseEnter={e => (e.currentTarget as HTMLButtonElement).style.backgroundColor = 'var(--accent-hover)'}
+            onMouseLeave={e => (e.currentTarget as HTMLButtonElement).style.backgroundColor = 'var(--accent)'}>
+            Siguiente →
+          </button>
+        )}
+      </div>
     </div>
   );
 }

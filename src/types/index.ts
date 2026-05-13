@@ -49,3 +49,38 @@ export interface NotificationMsg {
   message: string;
   time: string;
 }
+
+export interface MedicionEquipo {
+  equipo: string;
+  marca: string;
+  modelo: string;
+  serie: string;
+}
+
+export interface ReportTorre {
+  serial: string;
+  date: string;
+  client: string;
+  direccion?: string;
+  contrato?: string;
+  partida?: string;
+  subpartida?: string;
+  equipo?: string;
+  marca?: string;
+  modelo?: string;
+  numSerie?: string;
+  ubicacion?: string;
+  tipoServicio: 'preventivo' | 'correctivo' | 'diagnostico' | 'garantia' | 'instalacion' | 'capacitacion';
+  falla?: string;
+  condiciones?: string;
+  trabajos?: string;
+  refacciones?: string;
+  medicion?: MedicionEquipo[];
+  checklist1?: boolean[];
+  checklist2?: boolean[];
+  fotos?: {
+    antes1?: string; antes2?: string; antes3?: string;
+    durante1?: string; durante2?: string;
+    despues1?: string; despues2?: string;
+  };
+}

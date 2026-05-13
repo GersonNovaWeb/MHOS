@@ -1,7 +1,8 @@
 {
   "permissions": {
     "allow": [
-      "Bash(node fix-plantilla.mjs)"
+      "Bash(node fix-plantilla.mjs)",
+      "Bash(npx tsc *)"
     ]
   }
 }

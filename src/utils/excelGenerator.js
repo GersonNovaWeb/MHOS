@@ -204,3 +204,226 @@ export const generarExcelBuffer = async (reportData) => {
   const workbook = await construirWorkbook(reportData);
   return await workbook.xlsx.writeBuffer();
 };
+
+// ─── helpers ────────────────────────────────────────────────────────────────
+
+const t = (v, max) => (v ?? '').toString().trim().slice(0, max);
+
+const cargarFormatos = async (base) => {
+  const ExcelJS = (await import('exceljs')).default;
+  const response = await fetch(`${base}/templates/Formatos.xlsx`);
+  const arrayBuffer = await response.arrayBuffer();
+  const workbook = new ExcelJS.Workbook();
+  await workbook.xlsx.load(arrayBuffer);
+  return { ExcelJS, workbook };
+};
+
+const setTipoServicio = (ws, tipo, offset = 0) => {
+  const map = {
+    preventivo:  `D${14 + offset}`,
+    correctivo:  `D${17 + offset}`,
+    garantia:    `G${14 + offset}`,
+    diagnostico: `G${17 + offset}`,
+    instalacion: `I${14 + offset}`,
+    capacitacion:`I${17 + offset}`,
+  };
+  const addr = map[tipo];
+  if (addr) ws.getCell(addr).value = 'X';
+};
+
+const setEncabezadoReporte = (ws, d, rowOffset = 0) => {
+  const r = (n) => n + rowOffset;
+  ws.getCell(`D${r(2)}`).value  = t(d.serial,     20);
+  ws.getCell(`D${r(3)}`).value  = t(d.date,        20);
+  ws.getCell(`C${r(5)}`).value  = t(d.client,     100);
+  ws.getCell(`C${r(6)}`).value  = t(d.direccion,  150);
+  ws.getCell(`C${r(10)}`).value = t(d.contrato,    50);
+  setTipoServicio(ws, d.tipoServicio, rowOffset);
+  ws.getCell(`C${r(23)}`).value = t(d.equipo,      50);
+  ws.getCell(`J${r(23)}`).value = t(d.numSerie,    50);
+  ws.getCell(`C${r(24)}`).value = t(d.marca,       50);
+  ws.getCell(`C${r(25)}`).value = t(d.modelo,      50);
+  ws.getCell(`G${r(25)}`).value = t(d.ubicacion,   50);
+  ws.getCell(`C${r(27)}`).value = t(d.falla,      200);
+  ws.getCell(`D${r(29)}`).value = t(d.condiciones,100);
+  ws.getCell(`B${r(33)}`).value = t(d.trabajos,  1698);
+  ws.getCell(`E${r(45)}`).value = t(d.refacciones,200);
+  for (let i = 0; i < 6; i++) {
+    const med = d.medicion?.[i];
+    if (!med) continue;
+    const row = r(52) + i;
+    ws.getCell(`B${row}`).value = t(med.equipo,  50);
+    ws.getCell(`D${row}`).value = t(med.marca,   50);
+    ws.getCell(`F${row}`).value = t(med.modelo,  50);
+    ws.getCell(`J${row}`).value = t(med.serie,   50);
+  }
+};
+
+// ─── Función 1: Diagnóstico Torre ───────────────────────────────────────────
+
+export const construirWorkbookDiagnostico = async (reportData) => {
+  const { workbook } = await cargarFormatos(isProd ? '/Report_MHOS' : '');
+  const ws = workbook.worksheets[1]; // pestaña 2 (índice 1)
+
+  const headerBase64 = await getBase64ImageFromUrl(`${isProd ? '/Report_MHOS' : ''}/templates/header.png`);
+  const footerBase64 = await getBase64ImageFromUrl(`${isProd ? '/Report_MHOS' : ''}/templates/footer.png`);
+
+  if (headerBase64) {
+    const id = workbook.addImage({ base64: headerBase64, extension: 'png' });
+    ws.addImage(id, { tl: { col: 0, row: 0 }, br: { col: 12, row: 2 }, editAs: 'absolute' });
+  }
+  if (footerBase64) {
+    const id = workbook.addImage({ base64: footerBase64, extension: 'png' });
+    ws.addImage(id, { tl: { col: 0, row: 57 }, br: { col: 12, row: 59 }, editAs: 'absolute' });
+  }
+
+  setEncabezadoReporte(ws, reportData, 0);
+
+  ws.pageSetup.paperSize   = 9;
+  ws.pageSetup.orientation = 'portrait';
+  ws.pageSetup.fitToPage   = true;
+  ws.pageSetup.fitToWidth  = 1;
+  ws.pageSetup.fitToHeight = 1;
+  ws.pageSetup.printArea   = 'A1:M59';
+
+  return workbook;
+};
+
+export const generarDiagnosticoTorre = async (reportData) => {
+  try {
+    const FileSaver = await import('file-saver');
+    const saveAs = FileSaver.saveAs || FileSaver.default?.saveAs || FileSaver.default;
+    const workbook = await construirWorkbookDiagnostico(reportData);
+    const buffer = await workbook.xlsx.writeBuffer();
+    const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+    saveAs(blob, `Diagnostico_${reportData.serial}.xlsx`);
+  } catch (error) {
+    console.error('Error generarDiagnosticoTorre:', error);
+    alert('Error al generar el archivo de diagnóstico.');
+  }
+};
+
+export const generarDiagnosticoTorreBuffer = async (reportData) => {
+  const workbook = await construirWorkbookDiagnostico(reportData);
+  return await workbook.xlsx.writeBuffer();
+};
+
+// ─── Función 2: MHOS-A0143 (4 páginas) ─────────────────────────────────────
+
+export const construirWorkbookMhosA0143 = async (reportData) => {
+  const b = isProd ? '/Report_MHOS' : '';
+  const { workbook } = await cargarFormatos(b);
+  const ws = workbook.worksheets[2]; // pestaña 3 (índice 2)
+
+  const headerBase64 = await getBase64ImageFromUrl(`${b}/templates/header.png`);
+  const footerBase64 = await getBase64ImageFromUrl(`${b}/templates/footer.png`);
+
+  // Headers y footers en cada página (saltos en filas 1, 59, 100, 141)
+  const pageStarts = [0, 59, 100, 141];
+  if (headerBase64) {
+    const id = workbook.addImage({ base64: headerBase64, extension: 'png' });
+    pageStarts.forEach(start => {
+      ws.addImage(id, { tl: { col: 0, row: start }, br: { col: 12, row: start + 2 }, editAs: 'absolute' });
+    });
+  }
+  if (footerBase64) {
+    const id = workbook.addImage({ base64: footerBase64, extension: 'png' });
+    pageStarts.forEach(start => {
+      ws.addImage(id, { tl: { col: 0, row: start + 57 }, br: { col: 12, row: start + 59 }, editAs: 'absolute' });
+    });
+  }
+
+  // ── Sección 1: Reporte (filas 2–58) ─────────────────────────────────────
+  setEncabezadoReporte(ws, reportData, 0);
+
+  // ── Sección 2: Check List 1 (filas 61–99) ───────────────────────────────
+  ws.getCell('D61').value = t(reportData.serial,  20);
+  ws.getCell('D62').value = t(reportData.date,     20);
+  ws.getCell('B64').value = t(reportData.client,  100);
+  ws.getCell('C70').value = t(reportData.equipo,   50);
+  ws.getCell('J70').value = t(reportData.numSerie, 50);
+  ws.getCell('C71').value = t(reportData.marca,    50);
+  ws.getCell('C72').value = t(reportData.modelo,   50);
+  ws.getCell('G72').value = t(reportData.ubicacion,50);
+
+  for (let i = 0; i < 18; i++) {
+    if (reportData.checklist1?.[i]) {
+      const cell = ws.getCell(`L${77 + i}`);
+      cell.value = 'X';
+      cell.font  = { bold: true };
+    }
+  }
+
+  // ── Sección 3: Check List 2 (filas 102–140) ─────────────────────────────
+  ws.getCell('D102').value = t(reportData.serial,  20);
+  ws.getCell('D103').value = t(reportData.date,     20);
+  ws.getCell('B105').value = t(reportData.client,  100);
+  ws.getCell('C111').value = t(reportData.equipo,   50);
+  ws.getCell('J111').value = t(reportData.numSerie, 50);
+  ws.getCell('C112').value = t(reportData.marca,    50);
+  ws.getCell('C113').value = t(reportData.modelo,   50);
+  ws.getCell('G113').value = t(reportData.ubicacion,50);
+
+  for (let i = 0; i < 12; i++) {
+    if (reportData.checklist2?.[i]) {
+      const cell = ws.getCell(`L${118 + i}`);
+      cell.value = 'X';
+      cell.font  = { bold: true };
+    }
+  }
+
+  // ── Sección 4: Evidencia Fotográfica (filas 143–189) ────────────────────
+  ws.getCell('D143').value = t(reportData.serial,     20);
+  ws.getCell('D144').value = t(reportData.date,        20);
+  ws.getCell('B146').value = t(reportData.client,     100);
+  ws.getCell('C148').value = t(reportData.contrato,    50);
+  ws.getCell('F148').value = t(reportData.partida,     50);
+  ws.getCell('J148').value = t(reportData.subpartida,  50);
+
+  const addImg = async (b64, col, row) => {
+    if (!b64) return;
+    try {
+      const sq = await cropToSquare(b64);
+      const id = workbook.addImage({ base64: sq, extension: 'jpeg' });
+      ws.addImage(id, { tl: { col, row }, ext: { width: 180, height: 180 }, editAs: 'absolute' });
+    } catch (e) {}
+  };
+
+  if (reportData.fotos) {
+    await addImg(reportData.fotos.antes1,   1, 152);
+    await addImg(reportData.fotos.antes2,   4, 152);
+    await addImg(reportData.fotos.antes3,   7, 152);
+    await addImg(reportData.fotos.durante1, 1, 165);
+    await addImg(reportData.fotos.durante2, 4, 165);
+    await addImg(reportData.fotos.despues1, 1, 178);
+    await addImg(reportData.fotos.despues2, 4, 178);
+  }
+
+  ws.pageSetup.paperSize   = 9;
+  ws.pageSetup.orientation = 'portrait';
+  ws.pageSetup.fitToPage   = true;
+  ws.pageSetup.fitToWidth  = 1;
+  ws.pageSetup.fitToHeight = 4;
+  ws.pageSetup.printArea   = 'A1:M189';
+
+  return workbook;
+};
+
+export const generarMhosA0143 = async (reportData) => {
+  try {
+    const FileSaver = await import('file-saver');
+    const saveAs = FileSaver.saveAs || FileSaver.default?.saveAs || FileSaver.default;
+    const workbook = await construirWorkbookMhosA0143(reportData);
+    const buffer = await workbook.xlsx.writeBuffer();
+    const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+    saveAs(blob, `MHOS-A0143_${reportData.serial}.xlsx`);
+  } catch (error) {
+    console.error('Error generarMhosA0143:', error);
+    alert('Error al generar el archivo MHOS-A0143.');
+  }
+};
+
+export const generarMhosA0143Buffer = async (reportData) => {
+  const workbook = await construirWorkbookMhosA0143(reportData);
+  return await workbook.xlsx.writeBuffer();
+};
