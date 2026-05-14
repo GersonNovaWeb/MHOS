@@ -1,4 +1,4 @@
-import { generarExcelBuffer, generarDiagnosticoTorreBuffer, generarMhosA0143Buffers } from './excelGenerator';
+import { generarExcelBuffer, generarDiagnosticoTorreBuffer, generarMhosA0143Buffer } from './excelGenerator';
 
 export const generarPDF = async (reportData) => {
   try {
@@ -9,21 +9,20 @@ export const generarPDF = async (reportData) => {
     const isDiagnostico = reportData.type === 'diagnostico' || reportData._generator === 'diagnostico';
     const xlsxType = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 
-    const formData = new FormData();
-
+    let excelBuffer;
     if (isPreventivo) {
-      const buffers = await generarMhosA0143Buffers(reportData);
-      buffers.forEach((buf, i) => {
-        formData.append('files', new Blob([buf], { type: xlsxType }), `page${i + 1}.xlsx`);
-      });
+      excelBuffer = await generarMhosA0143Buffer(reportData);
+    } else if (isDiagnostico) {
+      excelBuffer = await generarDiagnosticoTorreBuffer(reportData);
     } else {
-      const excelBuffer = isDiagnostico
-        ? await generarDiagnosticoTorreBuffer(reportData)
-        : await generarExcelBuffer(reportData);
-      formData.append('file', new Blob([excelBuffer], { type: xlsxType }), 'temp.xlsx');
+      excelBuffer = await generarExcelBuffer(reportData);
     }
 
-    alert("Generando PDF con LibreOffice... Esto puede tomar unos segundos.");
+    const formData = new FormData();
+    formData.append('file', new Blob([excelBuffer], { type: xlsxType }), 'reporte.xlsx');
+    if (isPreventivo) formData.append('preventivo', 'true');
+
+    alert('Generando PDF... Esto puede tomar unos segundos.');
 
     const response = await fetch('/api/convert-to-pdf', {
       method: 'POST',
@@ -32,15 +31,14 @@ export const generarPDF = async (reportData) => {
 
     if (!response.ok) {
       const errBody = await response.json().catch(() => ({}));
-      const detail = errBody.stderr || errBody.stdout || errBody.error || response.statusText;
-      throw new Error(`La conversión falló en el servidor: ${detail}`);
+      throw new Error(errBody.error || 'La conversión falló en el servidor.');
     }
 
     const pdfBlob = await response.blob();
     saveAs(pdfBlob, `${reportData.serial}_Impresion.pdf`);
 
   } catch (error) {
-    console.error("Error en PDF Builder:", error);
-    alert("Error al generar PDF. Asegúrate de tener LibreOffice instalado y la API funcionando.");
+    console.error('Error en PDF Builder:', error);
+    alert(`Error al generar PDF: ${error.message}`);
   }
 };
