@@ -97,6 +97,7 @@ export async function POST(req: NextRequest) {
     const formData = await req.formData();
     const singleFile = formData.get('file') as Blob | null;
     const multiFiles  = formData.getAll('files') as Blob[];
+    console.log('[PDF] singleFile:', !!singleFile, 'multiFiles:', multiFiles.length);
 
     if (!singleFile && multiFiles.length === 0) {
       return NextResponse.json({ error: 'No se envió ningún archivo' }, { status: 400 });
@@ -145,6 +146,10 @@ export async function POST(req: NextRequest) {
     });
 
   } catch (error) {
+    console.error('[PDF ERROR]', JSON.stringify({
+      message: error instanceof Error ? error.message : String(error),
+      stack: error instanceof Error ? error.stack : '',
+    }));
     console.error('Error en la conversión:', error);
     const errorMsg = error instanceof Error ? error.message : String(error);
     return NextResponse.json({
