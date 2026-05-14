@@ -9,6 +9,7 @@ export interface User {
 export interface Section {
   id: string;
   name: string;
+  type?: 'preventivo' | 'diagnostico';
   client?: string;
   direccion?: string;
   contrato?: string;

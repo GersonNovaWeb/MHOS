@@ -1,11 +1,15 @@
-import { generarExcelBuffer } from './excelGenerator';
+import { generarExcelBuffer, generarDiagnosticoTorreBuffer, generarMhosA0143Buffer } from './excelGenerator';
 
 export const generarPDF = async (reportData) => {
   try {
     const FileSaver = await import('file-saver');
     const saveAs = FileSaver.saveAs || FileSaver.default?.saveAs || FileSaver.default;
 
-    const excelBuffer = await generarExcelBuffer(reportData);
+    const excelBuffer = reportData.type === 'diagnostico' || reportData._generator === 'diagnostico'
+      ? await generarDiagnosticoTorreBuffer(reportData)
+      : reportData.type === 'preventivo'
+      ? await generarMhosA0143Buffer(reportData)
+      : await generarExcelBuffer(reportData);
 
     const blob = new Blob([excelBuffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
     const formData = new FormData();

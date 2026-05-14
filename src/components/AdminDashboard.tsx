@@ -2,11 +2,10 @@
 
 import React, { useState } from 'react';
 import { FolderPlus, Download, Plus, Eye, EyeOff, ChevronDown, ChevronUp, Tag, FileText, Users, MessageSquare, BarChart, FileSpreadsheet, Camera, CheckSquare, Save, Search, Printer, Pencil, Trash2, X } from 'lucide-react';
-import { collection, addDoc, getDocs, updateDoc, deleteDoc, doc } from 'firebase/firestore';
+import { collection, addDoc, getDocs, updateDoc, deleteDoc, doc, getDoc } from 'firebase/firestore';
 import { db } from '../lib/firebase';
-import { generarExcel, generarDiagnosticoTorreBuffer, generarMhosA0143Buffer } from '../utils/excelGenerator';
+import { generarExcel, generarExcelBuffer, generarDiagnosticoTorreBuffer, generarMhosA0143Buffer, generarDiagnosticoTorre, generarMhosA0143 } from '../utils/excelGenerator';
 import { generarPDF } from '../utils/pdfGenerator';
-import { generarPDFjsPDF } from '../utils/pdfGeneratorJsPDF';
 import ChatSystem from './ChatSystem';
 import { User, Section, Report, Message, ReportTorre } from '../types';
 
@@ -27,9 +26,16 @@ export default function AdminDashboard({ sections, reports, messages, setMessage
   const setCurrentTab = setActiveTab !== undefined ? setActiveTab : setLocalActiveTab;
   const [searchTerm, setSearchTerm] = useState<string>('');
   const [editingReport, setEditingReport] = useState<(Report & Partial<ReportTorre>) | null>(null);
+  const [defaultSectionId, setDefaultSectionId] = useState<string>('');
 
-  const handleEditReport = (report: Report) => {
-    setEditingReport(report as Report & Partial<ReportTorre>);
+  const handleEditReport = async (report: Report) => {
+    try {
+      const snap = await getDoc(doc(db, 'reports', report.id));
+      const fullData = snap.exists() ? { id: snap.id, ...snap.data() } as Report & Partial<ReportTorre> : report as Report & Partial<ReportTorre>;
+      setEditingReport(fullData);
+    } catch {
+      setEditingReport(report as Report & Partial<ReportTorre>);
+    }
     setCurrentTab('edit_report');
   };
 
@@ -106,7 +112,7 @@ export default function AdminDashboard({ sections, reports, messages, setMessage
                 {sections.map((section: Section) => {
                   const secReps = filteredReports?.filter((r: Report) => r.sectionId === section.id);
                   if (searchTerm && (secReps?.length || 0) === 0) return null;
-                  return <AccordionItem key={section.id} section={section} reports={secReps} onEdit={handleEditReport} />;
+                  return <AccordionItem key={section.id} section={section} reports={secReps} onEdit={handleEditReport} onNewReport={(s) => { setDefaultSectionId(s.id); setCurrentTab(s.type === 'diagnostico' ? 'form_diagnostico' : 'form_preventivo'); }} />;
                 })}
                 {searchTerm && (filteredReports?.length || 0) === 0 && (
                   <div
@@ -167,6 +173,7 @@ export default function AdminDashboard({ sections, reports, messages, setMessage
             sections={sections}
             currentUser={currentUser}
             onCancel={() => setCurrentTab('hacer_reporte')}
+            defaultSectionId={defaultSectionId}
           />
         )}
 
@@ -208,7 +215,7 @@ function TabButton({ active, onClick, icon, label }: { active: boolean; onClick:
   );
 }
 
-function AccordionItem({ section, reports, onEdit }: { section: Section; reports: Report[]; onEdit?: (r: Report) => void }) {
+function AccordionItem({ section, reports, onEdit, onNewReport }: { section: Section; reports: Report[]; onEdit?: (r: Report) => void; onNewReport?: (s: Section) => void }) {
   const [isOpen, setIsOpen] = useState<boolean>(false);
 
   return (
@@ -258,6 +265,17 @@ function AccordionItem({ section, reports, onEdit }: { section: Section; reports
 
       {isOpen && (
         <div className="p-4 md:p-5" style={{ backgroundColor: 'var(--bg-secondary)', borderTop: '1px solid var(--border)' }}>
+          {onNewReport && (
+            <div className="flex justify-end mb-4">
+              <button
+                onClick={() => onNewReport(section)}
+                className="flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-semibold"
+                style={{ backgroundColor: 'var(--accent-light)', color: 'var(--accent)', border: '1px solid var(--accent-border)' }}
+              >
+                <Plus className="w-4 h-4" /> Nuevo Reporte
+              </button>
+            </div>
+          )}
           {(reports?.length || 0) === 0 ? (
             <p className="text-sm text-center py-8" style={{ color: 'var(--text-muted)' }}>Esta carpeta está vacía.</p>
           ) : (
@@ -308,7 +326,15 @@ function AccordionItem({ section, reports, onEdit }: { section: Section; reports
                       </button>
                     )}
                     <button
-                      onClick={() => generarExcel(report)}
+                      onClick={() => {
+                        if (report.type === 'diagnostico') {
+                          generarDiagnosticoTorre(report);
+                        } else if (report.type === 'preventivo') {
+                          generarMhosA0143(report);
+                        } else {
+                          generarExcel(report);
+                        }
+                      }}
                       className="flex-1 md:flex-none flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all duration-200"
                       style={{ backgroundColor: 'var(--success-light)', color: 'var(--success)', border: '1px solid var(--success)' }}
                       onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.backgroundColor = 'var(--success)'; (e.currentTarget as HTMLButtonElement).style.color = '#fff'; }}
@@ -317,22 +343,19 @@ function AccordionItem({ section, reports, onEdit }: { section: Section; reports
                       <Download className="w-4 h-4" /> Excel
                     </button>
                     <button
-                      onClick={() => generarPDF(report)}
+                      onClick={() => {
+                        if (report.type === 'diagnostico') {
+                          generarPDF({ ...report, _generator: 'diagnostico' });
+                        } else {
+                          generarPDF(report);
+                        }
+                      }}
                       className="flex-1 md:flex-none flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all duration-200"
                       style={{ backgroundColor: 'var(--danger-light)', color: 'var(--danger)', border: '1px solid var(--danger)' }}
                       onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.backgroundColor = 'var(--danger)'; (e.currentTarget as HTMLButtonElement).style.color = '#fff'; }}
                       onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.backgroundColor = 'var(--danger-light)'; (e.currentTarget as HTMLButtonElement).style.color = 'var(--danger)'; }}
                     >
                       <Printer className="w-4 h-4" /> PDF
-                    </button>
-                    <button
-                      onClick={() => generarPDFjsPDF(report)}
-                      className="flex-1 md:flex-none flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all duration-200"
-                      style={{ backgroundColor: 'rgba(168,85,247,0.08)', color: '#A855F7', border: '1px solid rgba(168,85,247,0.2)' }}
-                      onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.backgroundColor = '#A855F7'; (e.currentTarget as HTMLButtonElement).style.color = '#fff'; }}
-                      onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.backgroundColor = 'rgba(168,85,247,0.08)'; (e.currentTarget as HTMLButtonElement).style.color = '#A855F7'; }}
-                    >
-                      <FileText className="w-4 h-4" /> PDF 2
                     </button>
                   </div>
                 </div>
@@ -347,7 +370,7 @@ function AccordionItem({ section, reports, onEdit }: { section: Section; reports
 
 // ─── Section Manager ──────────────────────────────────────────────────────────
 
-const SECTION_EMPTY = { name: '', client: '', direccion: '', contrato: '', partida: '', equipo: '', marca: '', modelo: '', numSerieEq: '', folioSsm: '', ubicacion: '' };
+const SECTION_EMPTY = { name: '', type: 'preventivo' as 'preventivo' | 'diagnostico', client: '', direccion: '', contrato: '', partida: '', equipo: '', marca: '', modelo: '', numSerieEq: '', folioSsm: '', ubicacion: '' };
 
 function SectionFormFields({ form, setForm }: { form: typeof SECTION_EMPTY; setForm: (f: typeof SECTION_EMPTY) => void }) {
   const f = (field: keyof typeof SECTION_EMPTY) => (e: React.ChangeEvent<HTMLInputElement>) => setForm({ ...form, [field]: e.target.value });
@@ -364,6 +387,20 @@ function SectionFormFields({ form, setForm }: { form: typeof SECTION_EMPTY; setF
 
   return (
     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+      <div className="sm:col-span-2">
+        <label className={lbl} style={{ color: 'var(--text-muted)' }}>Tipo de Carpeta</label>
+        <select
+          value={form.type}
+          onChange={e => setForm({ ...form, type: e.target.value as 'preventivo' | 'diagnostico' })}
+          className={cls}
+          style={cls2}
+          onFocus={(e: React.FocusEvent<HTMLSelectElement>) => (e.currentTarget.style.borderColor = 'var(--accent)')}
+          onBlur={(e: React.FocusEvent<HTMLSelectElement>) => (e.currentTarget.style.borderColor = 'var(--border)')}
+        >
+          <option value="preventivo">Mantenimiento Preventivo</option>
+          <option value="diagnostico">Diagnóstico</option>
+        </select>
+      </div>
       <div className="sm:col-span-2">
         <label className={lbl} style={{ color: 'var(--text-muted)' }}>Nombre de Carpeta (Obligatorio)</label>
         <input type="text" required value={form.name} onChange={f('name')} placeholder="Ej: Mantenimiento Preventivo 2024" {...inputProps} />
@@ -435,7 +472,7 @@ function SectionManager({ sections }: { sections: Section[] }) {
 
   const openEdit = (s: Section) => {
     setEditingSection(s);
-    setEditForm({ name: s.name || '', client: s.client || '', direccion: s.direccion || '', contrato: s.contrato || '', partida: s.partida || '', equipo: s.equipo || '', marca: s.marca || '', modelo: s.modelo || '', numSerieEq: s.numSerieEq || '', folioSsm: s.folioSsm || '', ubicacion: s.ubicacion || '' });
+    setEditForm({ name: s.name || '', type: (s.type || 'preventivo') as 'preventivo' | 'diagnostico', client: s.client || '', direccion: s.direccion || '', contrato: s.contrato || '', partida: s.partida || '', equipo: s.equipo || '', marca: s.marca || '', modelo: s.modelo || '', numSerieEq: s.numSerieEq || '', folioSsm: s.folioSsm || '', ubicacion: s.ubicacion || '' });
   };
 
   const handleUpdate = async (e: React.FormEvent) => {
@@ -500,7 +537,17 @@ function SectionManager({ sections }: { sections: Section[] }) {
               <FolderPlus className="w-5 h-5" />
             </div>
             <div className="min-w-0 flex-1">
-              <span className="font-semibold block" style={{ color: 'var(--text-primary)' }}>{s.name}</span>
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="font-semibold" style={{ color: 'var(--text-primary)' }}>{s.name}</span>
+                <span
+                  className="text-[10px] px-2 py-0.5 rounded-md font-bold uppercase"
+                  style={s.type === 'diagnostico'
+                    ? { backgroundColor: 'var(--warning-light)', color: 'var(--warning)' }
+                    : { backgroundColor: 'var(--accent-light)', color: 'var(--accent)' }}
+                >
+                  {s.type === 'diagnostico' ? 'Diagnóstico' : 'Preventivo'}
+                </span>
+              </div>
               <div className="flex flex-wrap gap-x-4 gap-y-0.5 mt-0.5">
                 {s.client && <span className="text-xs" style={{ color: 'var(--text-muted)' }}>{s.client}</span>}
                 {s.equipo && <span className="text-xs" style={{ color: 'var(--text-muted)' }}>{s.equipo}</span>}
@@ -874,15 +921,20 @@ type TorreFormData = {
   trabajos: string;
   refacciones: string;
   medicion: { equipo: string; marca: string; modelo: string; serie: string }[];
+  tecnico: string;
+  firmaCoordinador: string;
+  firmaVobo: string;
+  firmaAdministrador: string;
+  selloUnidad: string;
   checklist1: boolean[];
   checklist2: boolean[];
   fotos: Record<string, string>;
 };
 
-function buildInitialTorre(init?: (Report & Partial<ReportTorre>)): TorreFormData {
+function buildInitialTorre(init?: (Report & Partial<ReportTorre>), type?: string, defaultSectionId?: string): TorreFormData {
   const d = init as Record<string, unknown> | undefined;
   return {
-    sectionId: (d?.sectionId as string) || '',
+    sectionId: (d?.sectionId as string) || defaultSectionId || '',
     serial: (d?.serial as string) || '',
     date: (d?.date as string) || new Date().toISOString().split('T')[0],
     client: (d?.client as string) || '',
@@ -890,7 +942,7 @@ function buildInitialTorre(init?: (Report & Partial<ReportTorre>)): TorreFormDat
     contrato: (d?.contrato as string) || '',
     partida: (d?.partida as string) || '',
     subpartida: (d?.subpartida as string) || '',
-    tipoServicio: (d?.tipoServicio as TorreFormData['tipoServicio']) || 'preventivo',
+    tipoServicio: (d?.tipoServicio as TorreFormData['tipoServicio']) || (type === 'diagnostico' ? 'diagnostico' : 'preventivo'),
     equipo: (d?.equipo as string) || '',
     marca: (d?.marca as string) || '',
     modelo: (d?.modelo as string) || '',
@@ -901,6 +953,11 @@ function buildInitialTorre(init?: (Report & Partial<ReportTorre>)): TorreFormDat
     trabajos: (d?.trabajos as string) || (d?.description as string) || '',
     refacciones: (d?.refacciones as string) || '',
     medicion: (d?.medicion as TorreFormData['medicion']) || Array(6).fill(null).map(() => ({ equipo: '', marca: '', modelo: '', serie: '' })),
+    tecnico: (d?.tecnico as string) || '',
+    firmaCoordinador: (d?.firmaCoordinador as string) || '',
+    firmaVobo: (d?.firmaVobo as string) || '',
+    firmaAdministrador: (d?.firmaAdministrador as string) || '',
+    selloUnidad: (d?.selloUnidad as string) || '',
     checklist1: (d?.checklist1 as boolean[]) || Array(18).fill(false),
     checklist2: (d?.checklist2 as boolean[]) || Array(12).fill(false),
     fotos: (d?.fotos as Record<string, string>) || {},
@@ -913,15 +970,16 @@ interface TorreWizardProps {
   currentUser: User;
   onCancel: () => void;
   initialData?: Report & Partial<ReportTorre>;
+  defaultSectionId?: string;
 }
 
-function TorreWizard({ type, sections, currentUser, onCancel, initialData }: TorreWizardProps) {
+function TorreWizard({ type, sections, currentUser, onCancel, initialData, defaultSectionId }: TorreWizardProps) {
   const [step, setStep] = useState(1);
   const [isSaving, setIsSaving] = useState(false);
   const [isGeneratingPDF, setIsGeneratingPDF] = useState(false);
   const [sectionSearch, setSectionSearch] = useState('');
   const [showSectionDropdown, setShowSectionDropdown] = useState(false);
-  const [fd, setFd] = useState<TorreFormData>(() => buildInitialTorre(initialData));
+  const [fd, setFd] = useState<TorreFormData>(() => buildInitialTorre(initialData, type, defaultSectionId));
 
   const upd = (k: keyof TorreFormData, v: unknown) => setFd(prev => ({ ...prev, [k]: v }));
 
@@ -965,7 +1023,13 @@ function TorreWizard({ type, sections, currentUser, onCancel, initialData }: Tor
         ubicacion: fd.ubicacion.trim().slice(0, 50), falla: fd.falla.trim().slice(0, 200),
         condiciones: fd.condiciones.trim().slice(0, 100), trabajos: fd.trabajos.trim().slice(0, 1698),
         refacciones: fd.refacciones.trim().slice(0, 200),
-        medicion: fd.medicion, checklist1: fd.checklist1, checklist2: fd.checklist2,
+        medicion: fd.medicion,
+        tecnico: fd.tecnico.trim().slice(0, 100),
+        firmaCoordinador: fd.firmaCoordinador.trim().slice(0, 100),
+        firmaVobo: fd.firmaVobo.trim().slice(0, 100),
+        firmaAdministrador: fd.firmaAdministrador.trim().slice(0, 100),
+        selloUnidad: fd.selloUnidad.trim().slice(0, 100),
+        checklist1: fd.checklist1, checklist2: fd.checklist2,
         fotos: fd.fotos, sectionId: fd.sectionId,
         jobId: currentUser.id, jobName: currentUser.name || currentUser.username,
         updatedAt: now,
@@ -986,8 +1050,9 @@ function TorreWizard({ type, sections, currentUser, onCancel, initialData }: Tor
     if (!fd.serial.trim()) return alert('Ingresa el folio antes de generar el PDF.');
     setIsGeneratingPDF(true);
     try {
-      const bufferFn = type === 'diagnostico' ? generarDiagnosticoTorreBuffer : generarMhosA0143Buffer;
-      const excelBuffer = await bufferFn(fd);
+      const excelBuffer = type === 'diagnostico'
+        ? await generarDiagnosticoTorreBuffer(fd)
+        : await generarMhosA0143Buffer(fd);
       const blob = new Blob([excelBuffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
       const form = new FormData();
       form.append('file', blob, 'temp.xlsx');
@@ -1011,7 +1076,7 @@ function TorreWizard({ type, sections, currentUser, onCancel, initialData }: Tor
 
   const stepLabels = type === 'preventivo'
     ? ['Datos del Reporte', 'Checklists y Fotos']
-    : ['Datos del Reporte', 'Fotos'];
+    : ['Datos del Reporte'];
 
   const isEditing = !!initialData?.id;
   const titleLabel = type === 'preventivo' ? 'Reporte Preventivo (MHOS-A0143)' : 'Reporte de Diagnóstico';
@@ -1110,14 +1175,13 @@ function TorreWizard({ type, sections, currentUser, onCancel, initialData }: Tor
               </div>
               <div>
                 <label className={lbl} style={{ color: 'var(--text-muted)' }}>Tipo de Servicio</label>
-                <select value={fd.tipoServicio} onChange={e => upd('tipoServicio', e.target.value as TorreFormData['tipoServicio'])} className={inCls + ' cursor-pointer'} style={taStyle} onFocus={onFocus} onBlur={onBlur}>
-                  <option value="preventivo">Preventivo</option>
-                  <option value="correctivo">Correctivo</option>
-                  <option value="garantia">Garantía</option>
-                  <option value="diagnostico">Diagnóstico</option>
-                  <option value="instalacion">Instalación</option>
-                  <option value="capacitacion">Capacitación</option>
-                </select>
+                <input
+                  type="text"
+                  value={fd.tipoServicio.charAt(0).toUpperCase() + fd.tipoServicio.slice(1)}
+                  readOnly
+                  className={inCls}
+                  style={{ ...taStyle, opacity: 0.7, cursor: 'default' }}
+                />
               </div>
             </div>
           </div>
@@ -1187,6 +1251,91 @@ function TorreWizard({ type, sections, currentUser, onCancel, initialData }: Tor
               ))}
             </div>
           </div>
+          {/* Firmas */}
+          <div>
+            <h3 className="font-bold pb-2 mb-4 text-lg" style={{ color: 'var(--text-primary)', borderBottom: '1px solid var(--border)' }}>Firmas</h3>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label className={lbl} style={{ color: 'var(--text-muted)' }}>Tec./Ing. De Servicio (automático)</label>
+                <input
+                  type="text"
+                  value={fd.tecnico || currentUser.name || currentUser.username || ''}
+                  readOnly
+                  className={inCls}
+                  style={{ ...taStyle, opacity: 0.7, cursor: 'default' }}
+                />
+              </div>
+              <div>
+                <label className={lbl} style={{ color: 'var(--text-muted)' }}>Coordinador de Servicio</label>
+                <input
+                  type="text"
+                  value={fd.firmaCoordinador || ''}
+                  onChange={e => upd('firmaCoordinador', e.target.value)}
+                  className={inCls}
+                  style={taStyle}
+                  onFocus={onFocus}
+                  onBlur={onBlur}
+                  placeholder="Nombre del Coordinador"
+                />
+              </div>
+              <div>
+                <label className={lbl} style={{ color: 'var(--text-muted)' }}>Vo.Bo. Entidad Responsable</label>
+                <input
+                  type="text"
+                  value={fd.firmaVobo || ''}
+                  onChange={e => upd('firmaVobo', e.target.value)}
+                  className={inCls}
+                  style={taStyle}
+                  onFocus={onFocus}
+                  onBlur={onBlur}
+                  placeholder="Nombre Vo.Bo."
+                />
+              </div>
+              <div>
+                <label className={lbl} style={{ color: 'var(--text-muted)' }}>Administrador/Responsable de la Unidad</label>
+                <input
+                  type="text"
+                  value={fd.firmaAdministrador || ''}
+                  onChange={e => upd('firmaAdministrador', e.target.value)}
+                  className={inCls}
+                  style={taStyle}
+                  onFocus={onFocus}
+                  onBlur={onBlur}
+                  placeholder="Nombre del Administrador"
+                />
+              </div>
+              <div>
+                <label className={lbl} style={{ color: 'var(--text-muted)' }}>Sello de la Unidad</label>
+                <input
+                  type="text"
+                  value={fd.selloUnidad || ''}
+                  onChange={e => upd('selloUnidad', e.target.value)}
+                  className={inCls}
+                  style={taStyle}
+                  onFocus={onFocus}
+                  onBlur={onBlur}
+                  placeholder="Sello de la Unidad"
+                />
+              </div>
+            </div>
+          </div>
+
+          {type === 'diagnostico' && (
+            <div className="flex flex-col sm:flex-row gap-3 pt-4" style={{ borderTop: '1px solid var(--border)' }}>
+              <button onClick={handleSave} disabled={isSaving}
+                className="flex-1 py-4 rounded-xl font-bold flex items-center justify-center gap-2 transition-all duration-200"
+                style={{ backgroundColor: 'var(--success)', color: '#fff', opacity: isSaving ? 0.7 : 1 }}>
+                <Save className="w-5 h-5" /> {isSaving ? 'Guardando...' : isEditing ? 'Guardar Cambios' : 'Guardar en Firebase'}
+              </button>
+              <button onClick={handleGenerarPDF} disabled={isGeneratingPDF}
+                className="flex-1 py-4 rounded-xl font-bold flex items-center justify-center gap-2 transition-all duration-200"
+                style={{ backgroundColor: 'var(--danger-light)', color: 'var(--danger)', border: '1px solid var(--danger)', opacity: isGeneratingPDF ? 0.7 : 1 }}
+                onMouseEnter={e => { if (!isGeneratingPDF) { (e.currentTarget as HTMLButtonElement).style.backgroundColor = 'var(--danger)'; (e.currentTarget as HTMLButtonElement).style.color = '#fff'; } }}
+                onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.backgroundColor = 'var(--danger-light)'; (e.currentTarget as HTMLButtonElement).style.color = 'var(--danger)'; }}>
+                <Printer className="w-5 h-5" /> {isGeneratingPDF ? 'Generando...' : 'Generar PDF'}
+              </button>
+            </div>
+          )}
         </div>
       )}
 
@@ -1291,7 +1440,7 @@ function TorreWizard({ type, sections, currentUser, onCancel, initialData }: Tor
           style={{ backgroundColor: 'var(--bg-secondary)', color: 'var(--text-secondary)', border: '1px solid var(--border)' }}>
           Atrás
         </button>
-        {step < 2 && (
+        {step < 2 && type === 'preventivo' && (
           <button onClick={() => setStep(2)}
             className="px-8 py-3 rounded-xl font-bold text-sm transition-all duration-200"
             style={{ backgroundColor: 'var(--accent)', color: '#fff' }}
