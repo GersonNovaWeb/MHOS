@@ -560,6 +560,9 @@ export const generarMhosA0143Buffers = async (reportData) => {
       ws.addImage(fId, { tl: { col: 1, row: 57 }, br: { col: 11, row: 62 }, editAs: 'absolute' });
     }
     setEncabezadoReporte(ws, d, 0);
+    ws.getCell('B58').value = t(d.firmaEntrega, 100);
+    ws.getCell('D58').value = t(d.firmaRecibe,  100);
+    ws.getCell('G58').value = t(d.firmaValida,  100);
     applyPageSetup(ws, 'A1:M59');
     return wb.xlsx.writeBuffer();
   };
@@ -579,17 +582,20 @@ export const generarMhosA0143Buffers = async (reportData) => {
     ws.getCell('D61').value = t(d.serial,    20);
     ws.getCell('D62').value = t(d.date,       20);
     ws.getCell('B64').value = t(d.client,    100);
-    ws.getCell('C70').value = t(d.equipo,     50);
-    ws.getCell('J70').value = t(d.numSerie,   50);
-    ws.getCell('C71').value = t(d.marca,      50);
-    ws.getCell('C72').value = t(d.modelo,     50);
-    ws.getCell('G72').value = t(d.ubicacion,  50);
+    ws.getCell('C70').value = t(d.equipo,                        50);
+    ws.getCell('J70').value = t(d.numSerieEq || d.numSerie || '', 50);
+    ws.getCell('C71').value = t(d.marca,                         50);
+    ws.getCell('C72').value = t(d.modelo,                        50);
+    ws.getCell('G72').value = t(d.ubicacion,                     50);
     for (let i = 0; i < 18; i++) {
       if (d.checklist1?.[i]) {
         ws.getCell(`L${77 + i}`).value = 'X';
         ws.getCell(`L${77 + i}`).font  = { bold: true };
       }
     }
+    ws.getCell('B99').value = t(d.firmaEntrega, 100);
+    ws.getCell('D99').value = t(d.firmaRecibe,  100);
+    ws.getCell('G99').value = t(d.firmaValida,  100);
     applyPageSetup(ws, 'A60:M100');
     return wb.xlsx.writeBuffer();
   };
@@ -610,7 +616,7 @@ export const generarMhosA0143Buffers = async (reportData) => {
     ws.getCell('D103').value = t(d.date,       20);
     ws.getCell('B105').value = t(d.client,    100);
     ws.getCell('C111').value = t(d.equipo,     50);
-    ws.getCell('J111').value = t(d.numSerie,   50);
+    ws.getCell('J111').value = t(d.numSerieEq || d.numSerie || '', 50);
     ws.getCell('C112').value = t(d.marca,      50);
     ws.getCell('C113').value = t(d.modelo,     50);
     ws.getCell('G113').value = t(d.ubicacion,  50);
@@ -620,6 +626,9 @@ export const generarMhosA0143Buffers = async (reportData) => {
         ws.getCell(`L${118 + i}`).font  = { bold: true };
       }
     }
+    ws.getCell('B140').value = t(d.firmaEntrega, 100);
+    ws.getCell('D140').value = t(d.firmaRecibe,  100);
+    ws.getCell('G140').value = t(d.firmaValida,  100);
     applyPageSetup(ws, 'A101:M141');
     return wb.xlsx.writeBuffer();
   };
@@ -659,6 +668,9 @@ export const generarMhosA0143Buffers = async (reportData) => {
       await addFoto(d.fotos.despues1, 1, 178);
       await addFoto(d.fotos.despues2, 4, 178);
     }
+    ws.getCell('B189').value = t(d.firmaEntrega, 100);
+    ws.getCell('D189').value = t(d.firmaRecibe,  100);
+    ws.getCell('G189').value = t(d.firmaValida,  100);
     applyPageSetup(ws, 'A142:M189');
     return wb.xlsx.writeBuffer();
   };
