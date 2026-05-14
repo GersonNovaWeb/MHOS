@@ -5,6 +5,7 @@ import { FileSpreadsheet, Camera, Save, FolderPlus, CheckSquare, Users, Search }
 import { collection, addDoc, getDocs } from 'firebase/firestore';
 import { db } from '../lib/firebase';
 import { generarExcel } from '../utils/excelGenerator';
+import { generarPDF } from '../utils/pdfGenerator';
 import ChatSystem from './ChatSystem';
 import { User, Section, Message } from '../types';
 
@@ -182,13 +183,13 @@ function JobWizard({ type, sections, currentUser, onCancel }: JobWizardProps) {
       const count = snapshot.size + 1;
       const serial = `MHOS-SSM-EL-${String(count).padStart(4, '0')}`;
       const finalReport = {
-        serial, type: type || 'Preventivo',
+        serial, type: (type || 'Preventivo').toLowerCase(),
         jobId: currentUser.id, jobName: currentUser.name || currentUser.username,
         date: new Date().toISOString().split('T')[0], createdAt: new Date().toISOString(),
         ...data
       };
       await addDoc(collection(db, 'reports'), finalReport);
-      await generarExcel(finalReport);
+      await generarPDF(finalReport);
       alert(`¡Reporte Creado Exitosamente!\nFolio: ${serial}\nEl Excel se ha descargado.`);
       onCancel();
     } catch (_err) { alert("Error al guardar en la nube. Intenta de nuevo."); }
