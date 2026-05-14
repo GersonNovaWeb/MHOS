@@ -492,14 +492,15 @@ export const construirWorkbookMhosA0143 = async (reportData) => {
     await addImg(reportData.fotos.despues2, 4, 178);
   }
 
-  ws.pageSetup.paperSize   = 1;
+  ws.pageSetup.paperSize   = 9;
   ws.pageSetup.orientation = 'portrait';
-  ws.pageSetup.fitToPage   = false;
-  ws.pageSetup.scale       = 69;
+  ws.pageSetup.fitToPage   = true;
+  ws.pageSetup.fitToWidth  = 1;
+  ws.pageSetup.fitToHeight = 4;
   ws.pageSetup.printArea   = 'A1:M189';
   ws.pageSetup.margins = {
-    left: 0.4, right: 0.4, top: 0.55,
-    bottom: 0.0, header: 0.0, footer: 0.0
+    left: 0.4, right: 0.4, top: 0.4,
+    bottom: 0.4, header: 0, footer: 0
   };
 
   return workbook;
@@ -519,30 +520,159 @@ export const generarMhosA0143 = async (reportData) => {
   }
 };
 
+export const generarMhosA0143Buffers = async (reportData) => {
+  const b = isProd ? '/Report_MHOS' : '';
+  const ExcelJS = (await import('exceljs')).default;
+
+  const response = await fetch(`${b}/templates/Formato_Preventivo.xlsx`);
+  if (!response.ok) throw new Error(`Formato_Preventivo.xlsx no encontrado`);
+  const templateBuffer = await response.arrayBuffer();
+
+  const headerBase64 = await getBase64ImageFromUrl(`${b}/templates/header.png`);
+  const footerBase64 = await getBase64ImageFromUrl(`${b}/templates/footer.png`);
+
+  const loadWb = async () => {
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.load(templateBuffer.slice(0));
+    return wb;
+  };
+
+  const applyPageSetup = (ws, printArea) => {
+    ws.pageSetup.paperSize   = 9;
+    ws.pageSetup.orientation = 'portrait';
+    ws.pageSetup.fitToPage   = false;
+    ws.pageSetup.scale       = 69;
+    ws.pageSetup.fitToWidth  = 1;
+    ws.pageSetup.printArea   = printArea;
+    ws.pageSetup.margins = { left: 0.4, right: 0.4, top: 0.4, bottom: 0.4, header: 0, footer: 0 };
+  };
+
+  const buildPage1 = async (d) => {
+    const wb = await loadWb();
+    const ws = wb.worksheets[0];
+    ws.getRow(1).height = 75;
+    if (headerBase64) {
+      const hId = wb.addImage({ base64: headerBase64, extension: 'png' });
+      ws.addImage(hId, { tl: { col: 1, row: 0 }, br: { col: 11, row: 1 }, editAs: 'absolute' });
+    }
+    if (footerBase64) {
+      const fId = wb.addImage({ base64: footerBase64, extension: 'png' });
+      ws.addImage(fId, { tl: { col: 1, row: 57 }, br: { col: 11, row: 62 }, editAs: 'absolute' });
+    }
+    setEncabezadoReporte(ws, d, 0);
+    applyPageSetup(ws, 'A1:M59');
+    return wb.xlsx.writeBuffer();
+  };
+
+  const buildPage2 = async (d) => {
+    const wb = await loadWb();
+    const ws = wb.worksheets[0];
+    ws.getRow(60).height = 75;
+    if (headerBase64) {
+      const hId = wb.addImage({ base64: headerBase64, extension: 'png' });
+      ws.addImage(hId, { tl: { col: 1, row: 59 }, br: { col: 11, row: 60 }, editAs: 'absolute' });
+    }
+    if (footerBase64) {
+      const fId = wb.addImage({ base64: footerBase64, extension: 'png' });
+      ws.addImage(fId, { tl: { col: 1, row: 97 }, br: { col: 11, row: 102 }, editAs: 'absolute' });
+    }
+    ws.getCell('D61').value = t(d.serial,    20);
+    ws.getCell('D62').value = t(d.date,       20);
+    ws.getCell('B64').value = t(d.client,    100);
+    ws.getCell('C70').value = t(d.equipo,     50);
+    ws.getCell('J70').value = t(d.numSerie,   50);
+    ws.getCell('C71').value = t(d.marca,      50);
+    ws.getCell('C72').value = t(d.modelo,     50);
+    ws.getCell('G72').value = t(d.ubicacion,  50);
+    for (let i = 0; i < 18; i++) {
+      if (d.checklist1?.[i]) {
+        ws.getCell(`L${77 + i}`).value = 'X';
+        ws.getCell(`L${77 + i}`).font  = { bold: true };
+      }
+    }
+    applyPageSetup(ws, 'A60:M100');
+    return wb.xlsx.writeBuffer();
+  };
+
+  const buildPage3 = async (d) => {
+    const wb = await loadWb();
+    const ws = wb.worksheets[0];
+    ws.getRow(101).height = 75;
+    if (headerBase64) {
+      const hId = wb.addImage({ base64: headerBase64, extension: 'png' });
+      ws.addImage(hId, { tl: { col: 1, row: 100 }, br: { col: 11, row: 101 }, editAs: 'absolute' });
+    }
+    if (footerBase64) {
+      const fId = wb.addImage({ base64: footerBase64, extension: 'png' });
+      ws.addImage(fId, { tl: { col: 1, row: 138 }, br: { col: 11, row: 143 }, editAs: 'absolute' });
+    }
+    ws.getCell('D102').value = t(d.serial,    20);
+    ws.getCell('D103').value = t(d.date,       20);
+    ws.getCell('B105').value = t(d.client,    100);
+    ws.getCell('C111').value = t(d.equipo,     50);
+    ws.getCell('J111').value = t(d.numSerie,   50);
+    ws.getCell('C112').value = t(d.marca,      50);
+    ws.getCell('C113').value = t(d.modelo,     50);
+    ws.getCell('G113').value = t(d.ubicacion,  50);
+    for (let i = 0; i < 12; i++) {
+      if (d.checklist2?.[i]) {
+        ws.getCell(`L${118 + i}`).value = 'X';
+        ws.getCell(`L${118 + i}`).font  = { bold: true };
+      }
+    }
+    applyPageSetup(ws, 'A101:M141');
+    return wb.xlsx.writeBuffer();
+  };
+
+  const buildPage4 = async (d) => {
+    const wb = await loadWb();
+    const ws = wb.worksheets[0];
+    ws.getRow(142).height = 75;
+    if (headerBase64) {
+      const hId = wb.addImage({ base64: headerBase64, extension: 'png' });
+      ws.addImage(hId, { tl: { col: 1, row: 141 }, br: { col: 11, row: 142 }, editAs: 'absolute' });
+    }
+    if (footerBase64) {
+      const fId = wb.addImage({ base64: footerBase64, extension: 'png' });
+      ws.addImage(fId, { tl: { col: 1, row: 184 }, br: { col: 11, row: 190 }, editAs: 'absolute' });
+    }
+    ws.getCell('D143').value = t(d.serial,     20);
+    ws.getCell('D144').value = t(d.date,        20);
+    ws.getCell('B146').value = t(d.client,     100);
+    ws.getCell('C148').value = t(d.contrato,    50);
+    ws.getCell('F148').value = t(d.partida,     50);
+    ws.getCell('J148').value = t(d.subpartida,  50);
+    const addFoto = async (b64, col, row) => {
+      if (!b64 || b64.length < 500) return;
+      try {
+        const sq = await cropToSquare(b64);
+        const id = wb.addImage({ base64: sq, extension: 'jpeg' });
+        ws.addImage(id, { tl: { col, row }, ext: { width: 180, height: 180 }, editAs: 'absolute' });
+      } catch(e) {}
+    };
+    if (d.fotos) {
+      await addFoto(d.fotos.antes1,   1, 152);
+      await addFoto(d.fotos.antes2,   4, 152);
+      await addFoto(d.fotos.antes3,   7, 152);
+      await addFoto(d.fotos.durante1, 1, 165);
+      await addFoto(d.fotos.durante2, 4, 165);
+      await addFoto(d.fotos.despues1, 1, 178);
+      await addFoto(d.fotos.despues2, 4, 178);
+    }
+    applyPageSetup(ws, 'A142:M189');
+    return wb.xlsx.writeBuffer();
+  };
+
+  const [b1, b2, b3, b4] = await Promise.all([
+    buildPage1(reportData),
+    buildPage2(reportData),
+    buildPage3(reportData),
+    buildPage4(reportData),
+  ]);
+  return [b1, b2, b3, b4];
+};
+
 export const generarMhosA0143Buffer = async (reportData) => {
-  const workbook = await construirWorkbookMhosA0143(reportData);
-  const excelBuffer = await workbook.xlsx.writeBuffer();
-
-  // Parchear el XML para garantizar rowBreaks correctos para LibreOffice
-  const JSZip = (await import('jszip')).default;
-  const zip = await JSZip.loadAsync(excelBuffer);
-
-  // Leer el sheet XML
-  const sheetFiles = Object.keys(zip.files).filter(f => f.match(/xl\/worksheets\/sheet\d+\.xml/));
-  const sheetFile = sheetFiles[0];
-  let sheetXml = await zip.file(sheetFile).async('text');
-
-  // Inyectar rowBreaks correctos antes de </worksheet>
-  const rowBreaksXml = '<rowBreaks count="4" manualBreakCount="4"><brk id="1" max="12" man="1"/><brk id="59" max="12" man="1"/><brk id="100" max="12" man="1"/><brk id="141" max="12" man="1"/></rowBreaks>';
-
-  // Eliminar rowBreaks existentes si los hay
-  sheetXml = sheetXml.replace(/<rowBreaks[^>]*>.*?<\/rowBreaks>/gs, '');
-
-  // Insertar antes de </worksheet>
-  sheetXml = sheetXml.replace('</worksheet>', rowBreaksXml + '</worksheet>');
-
-  zip.file(sheetFile, sheetXml);
-
-  const patchedBuffer = await zip.generateAsync({ type: 'arraybuffer' });
-  return patchedBuffer;
+  const [b1] = await generarMhosA0143Buffers(reportData);
+  return b1;
 };
