@@ -432,13 +432,16 @@ export const construirWorkbookMhosA0143 = async (reportData) => {
 
   // Llenar datos
   setEncabezadoReporte(ws, reportData, 0);
+  ws.getCell('B58').value = t(reportData.firmaEntrega, 100);
+  ws.getCell('D58').value = t(reportData.firmaRecibe,  100);
+  ws.getCell('G58').value = t(reportData.firmaValida,  100);
 
   // Sección 2 - Check List 1
   ws.getCell('D61').value = t(reportData.serial,   20);
   ws.getCell('D62').value = t(reportData.date,      20);
   ws.getCell('B64').value = t(reportData.client,   100);
   ws.getCell('C70').value = t(reportData.equipo,    50);
-  ws.getCell('J70').value = t(reportData.numSerie,  50);
+  ws.getCell('J70').value = t(reportData.numSerieEq || reportData.numSerie || '', 50);
   ws.getCell('C71').value = t(reportData.marca,     50);
   ws.getCell('C72').value = t(reportData.modelo,    50);
   ws.getCell('G72').value = t(reportData.ubicacion, 50);
@@ -448,13 +451,16 @@ export const construirWorkbookMhosA0143 = async (reportData) => {
       ws.getCell(`L${77+i}`).font = { bold: true };
     }
   }
+  ws.getCell('B99').value = t(reportData.firmaEntrega, 100);
+  ws.getCell('D99').value = t(reportData.firmaRecibe,  100);
+  ws.getCell('G99').value = t(reportData.firmaValida,  100);
 
   // Sección 3 - Check List 2
   ws.getCell('D102').value = t(reportData.serial,   20);
   ws.getCell('D103').value = t(reportData.date,      20);
   ws.getCell('B105').value = t(reportData.client,   100);
   ws.getCell('C111').value = t(reportData.equipo,    50);
-  ws.getCell('J111').value = t(reportData.numSerie,  50);
+  ws.getCell('J111').value = t(reportData.numSerieEq || reportData.numSerie || '', 50);
   ws.getCell('C112').value = t(reportData.marca,     50);
   ws.getCell('C113').value = t(reportData.modelo,    50);
   ws.getCell('G113').value = t(reportData.ubicacion, 50);
@@ -464,6 +470,9 @@ export const construirWorkbookMhosA0143 = async (reportData) => {
       ws.getCell(`L${118+i}`).font = { bold: true };
     }
   }
+  ws.getCell('B140').value = t(reportData.firmaEntrega, 100);
+  ws.getCell('D140').value = t(reportData.firmaRecibe,  100);
+  ws.getCell('G140').value = t(reportData.firmaValida,  100);
 
   // Sección 4 - Evidencia Fotográfica
   ws.getCell('D143').value = t(reportData.serial,      20);
@@ -491,6 +500,9 @@ export const construirWorkbookMhosA0143 = async (reportData) => {
     await addImg(reportData.fotos.despues1, 1, 178);
     await addImg(reportData.fotos.despues2, 4, 178);
   }
+  ws.getCell('B189').value = t(reportData.firmaEntrega, 100);
+  ws.getCell('D189').value = t(reportData.firmaRecibe,  100);
+  ws.getCell('G189').value = t(reportData.firmaValida,  100);
 
   ws.pageSetup.paperSize   = 9;
   ws.pageSetup.orientation = 'portrait';
@@ -685,6 +697,6 @@ export const generarMhosA0143Buffers = async (reportData) => {
 };
 
 export const generarMhosA0143Buffer = async (reportData) => {
-  const [b1] = await generarMhosA0143Buffers(reportData);
-  return b1;
+  const workbook = await construirWorkbookMhosA0143(reportData);
+  return await workbook.xlsx.writeBuffer();
 };

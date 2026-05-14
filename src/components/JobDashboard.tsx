@@ -4,7 +4,6 @@ import React, { useState } from 'react';
 import { FileSpreadsheet, Camera, Save, FolderPlus, CheckSquare, Users, Search } from 'lucide-react';
 import { collection, addDoc, getDocs } from 'firebase/firestore';
 import { db } from '../lib/firebase';
-import { generarExcel } from '../utils/excelGenerator';
 import { generarPDF } from '../utils/pdfGenerator';
 import ChatSystem from './ChatSystem';
 import { User, Section, Message } from '../types';
@@ -130,23 +129,65 @@ function JobWizard({ type, sections, currentUser, onCancel }: JobWizardProps) {
   const [showSectionDropdown, setShowSectionDropdown] = useState<boolean>(false);
 
   const [data, setData] = useState({
-    sectionId: '', client: '', direccion: '', contrato: '', partida: '',
+    sectionId: '', client: '', direccion: '', contrato: '', partida: '', subpartida: '',
+    tipoServicio: 'preventivo',
     equipo: '', marca: '', modelo: '', numSerieEq: '', folioSsm: '', ubicacion: '',
     falla: '', condiciones: '', trabajos: '',
     refacciones: ['', '', '', ''],
-    medicion: [{ equipo: '', marca: '', modelo: '', serie: '' }, { equipo: '', marca: '', modelo: '', serie: '' }, { equipo: '', marca: '', modelo: '', serie: '' }],
-    checklist: Array(28).fill(false),
+    medicion: [
+      { equipo: '', marca: '', modelo: '', serie: '' },
+      { equipo: '', marca: '', modelo: '', serie: '' },
+      { equipo: '', marca: '', modelo: '', serie: '' },
+    ],
+    checklist1: Array(18).fill(false),
+    checklist2: Array(12).fill(false),
     firmaEntrega: currentUser.name || '', firmaRecibe: '', firmaValida: '',
-    fotos: { antes1: '', antes2: '', antes3: '', durante1: '', durante2: '', despues1: '', despues2: '', etiqueta: '' } as Record<string, string>
+    fotos: { antes1: '', antes2: '', antes3: '', durante1: '', durante2: '', despues1: '', despues2: '' } as Record<string, string>,
   });
 
-  const LISTA_CHECKLIST = [
-    "Aire de 1 y 2 Toneladas", "Verificación visual", "Pruebas previas", "Alarmas y control", "Conexión a tierra",
-    "Limpieza gabinete", "Mant. condensador", "Retirar materiales", "Alineación serpentín", "Lavado con químicos",
-    "Tableta charola", "Mant. compresor", "Mant. ventilador", "Mant. evaporador", "Válvula expansión",
-    "Carga refrigerante", "Arranque compresor", "Sensor temperatura", "Calibración control", "Amperaje y sobrecarga",
-    "Limpieza general", "Reemplazo filtros", "Motores extractores", "Motores inyectores", "Bandas y aspiradores",
-    "Puesta en marcha", "Verificar funcionamiento", "Pruebas de esfuerzo"
+  const CHECKLIST_1 = [
+    "Verificación visual del equipo",
+    "Pruebas de funcionamiento previas",
+    "Revisión de alarmas y controles",
+    "Verificación de conexión a tierra",
+    "Limpieza de gabinete exterior",
+    "Mantenimiento de condensador",
+    "Retiro de materiales extraños",
+    "Alineación de serpentín",
+    "Lavado con productos químicos",
+    "Tableta para charola de condensados",
+    "Mantenimiento de compresor",
+    "Mantenimiento de ventilador",
+    "Mantenimiento de evaporador",
+    "Revisión de válvula de expansión",
+    "Carga / verificación de refrigerante",
+    "Arranque y revisión de compresor",
+    "Calibración de sensor de temperatura",
+    "Calibración de control",
+  ];
+
+  const CHECKLIST_2 = [
+    "Revisión de amperaje y sobrecarga",
+    "Limpieza general del sistema",
+    "Reemplazo de filtros",
+    "Revisión de motores extractores",
+    "Revisión de motores inyectores",
+    "Revisión de bandas y aspiradores",
+    "Puesta en marcha del equipo",
+    "Verificación de funcionamiento final",
+    "Pruebas de esfuerzo",
+    "Revisión eléctrica general",
+    "Revisión de conexiones y terminales",
+    "Informe final al cliente",
+  ];
+
+  const TIPOS_SERVICIO = [
+    { key: 'preventivo',   label: 'Preventivo'   },
+    { key: 'correctivo',   label: 'Correctivo'   },
+    { key: 'garantia',     label: 'Garantía'     },
+    { key: 'diagnostico',  label: 'Diagnóstico'  },
+    { key: 'instalacion',  label: 'Instalación'  },
+    { key: 'capacitacion', label: 'Capacitación' },
   ];
 
   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>, fotoKey: string) => {
@@ -176,7 +217,8 @@ function JobWizard({ type, sections, currentUser, onCancel }: JobWizardProps) {
   };
 
   const handleSave = async () => {
-    if (!data.sectionId || !data.client) return alert("Llena al menos la Carpeta y el Cliente en la Página 1");
+    if (step !== 4) return;
+    if (!data.sectionId || !data.client) return alert("Llena al menos la Carpeta y el Cliente en el Paso 1");
     setIsSaving(true);
     try {
       const snapshot = await getDocs(collection(db, 'reports'));
@@ -190,14 +232,66 @@ function JobWizard({ type, sections, currentUser, onCancel }: JobWizardProps) {
       };
       await addDoc(collection(db, 'reports'), finalReport);
       await generarPDF(finalReport);
-      alert(`¡Reporte Creado Exitosamente!\nFolio: ${serial}\nEl Excel se ha descargado.`);
+      alert(`¡Reporte Creado Exitosamente!\nFolio: ${serial}`);
       onCancel();
     } catch (_err) { alert("Error al guardar en la nube. Intenta de nuevo."); }
     setIsSaving(false);
   };
 
-  const pageTitles = ["Página 1: Generales y Equipo", "Página 2: Rutina Anexo Técnico (Checklist)", "Página 3: Evidencia Fotográfica"];
+  const pageTitles = [
+    "Paso 1: Datos Generales",
+    "Paso 2: Checklist 1 — Rutina de Mantenimiento",
+    "Paso 3: Checklist 2 — Revisión Complementaria",
+    "Paso 4: Evidencia Fotográfica",
+  ];
   const taStyle = { backgroundColor: 'var(--bg-secondary)', border: '1px solid var(--border)', color: 'var(--text-primary)' };
+
+  const renderChecklist = (items: string[], state: boolean[], key: 'checklist1' | 'checklist2') => (
+    <div className="animate-in fade-in space-y-5">
+      <div className="p-4 rounded-xl" style={{ backgroundColor: 'var(--accent-light)', border: '1px solid var(--accent-border)' }}>
+        <p className="text-sm font-medium" style={{ color: 'var(--accent)' }}>
+          Marca las casillas de las acciones que realizaste. En el PDF aparecerá una &quot;X&quot; en negritas.
+        </p>
+      </div>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-2 p-5 rounded-2xl" style={{ backgroundColor: 'var(--bg-secondary)', border: '1px solid var(--border)' }}>
+        {items.map((item, index) => (
+          <label
+            key={index}
+            className="flex items-start gap-3 p-3 rounded-xl cursor-pointer transition-all duration-200"
+            style={{ border: '1px solid transparent' }}
+            onMouseEnter={e => (e.currentTarget.style.borderColor = 'var(--border)')}
+            onMouseLeave={e => (e.currentTarget.style.borderColor = 'transparent')}
+          >
+            <div className="relative mt-0.5 shrink-0">
+              <input
+                type="checkbox"
+                checked={state[index]}
+                onChange={e => {
+                  const newChecks = [...state]; newChecks[index] = e.target.checked;
+                  setData({ ...data, [key]: newChecks });
+                }}
+                className="sr-only"
+              />
+              <div
+                className="w-5 h-5 rounded-md flex items-center justify-center transition-all duration-200"
+                style={{
+                  backgroundColor: state[index] ? 'var(--success)' : 'transparent',
+                  border: `2px solid ${state[index] ? 'var(--success)' : 'var(--border-strong)'}`,
+                }}
+              >
+                {state[index] && (
+                  <svg className="w-3 h-3" viewBox="0 0 12 12" fill="none">
+                    <path d="M2 6l3 3 5-5" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
+                )}
+              </div>
+            </div>
+            <span className="text-sm leading-tight pt-0.5" style={{ color: state[index] ? 'var(--text-primary)' : 'var(--text-secondary)' }}>{item}</span>
+          </label>
+        ))}
+      </div>
+    </div>
+  );
 
   return (
     <div className="max-w-4xl mx-auto">
@@ -206,7 +300,7 @@ function JobWizard({ type, sections, currentUser, onCancel }: JobWizardProps) {
         <div>
           <h2 className="text-2xl font-bold mb-3" style={{ color: 'var(--text-primary)' }}>{pageTitles[step - 1]}</h2>
           <div className="flex items-center gap-1">
-            {[1, 2, 3].map(n => {
+            {[1, 2, 3, 4].map(n => {
               const completed = step > n;
               const active = step === n;
               return (
@@ -225,13 +319,13 @@ function JobWizard({ type, sections, currentUser, onCancel }: JobWizardProps) {
                       </svg>
                     ) : n}
                   </div>
-                  {n < 3 && (
+                  {n < 4 && (
                     <div className="w-10 h-0.5 transition-all duration-200" style={{ backgroundColor: step > n ? 'var(--success)' : 'var(--border)' }} />
                   )}
                 </div>
               );
             })}
-            <span className="text-xs ml-2" style={{ color: 'var(--text-muted)' }}>Paso {step} de 3</span>
+            <span className="text-xs ml-2" style={{ color: 'var(--text-muted)' }}>Paso {step} de 4</span>
           </div>
         </div>
         <button
@@ -295,6 +389,28 @@ function JobWizard({ type, sections, currentUser, onCancel }: JobWizardProps) {
               </div>
             </div>
 
+            {/* Tipo de Servicio */}
+            <div>
+              <h3 className="font-bold pb-2 mb-4 text-lg" style={{ color: 'var(--text-primary)', borderBottom: '1px solid var(--border)' }}>Tipo de Servicio</h3>
+              <div className="grid grid-cols-3 md:grid-cols-6 gap-3">
+                {TIPOS_SERVICIO.map(({ key, label }) => (
+                  <button
+                    key={key}
+                    type="button"
+                    onClick={() => setData({ ...data, tipoServicio: key })}
+                    className="px-3 py-3 rounded-xl text-sm font-semibold transition-all duration-200"
+                    style={{
+                      backgroundColor: data.tipoServicio === key ? 'var(--accent)' : 'var(--bg-secondary)',
+                      color: data.tipoServicio === key ? '#fff' : 'var(--text-secondary)',
+                      border: `2px solid ${data.tipoServicio === key ? 'var(--accent)' : 'var(--border)'}`,
+                    }}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
             <div>
               <h3 className="font-bold pb-2 mb-4 text-lg" style={{ color: 'var(--text-primary)', borderBottom: '1px solid var(--border)' }}>Datos Generales</h3>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
@@ -302,6 +418,7 @@ function JobWizard({ type, sections, currentUser, onCancel }: JobWizardProps) {
                 <InputRow label="Dirección" value={data.direccion} onChange={e => setData({ ...data, direccion: e.target.value })} span={2} />
                 <InputRow label="N° Contrato" value={data.contrato} onChange={e => setData({ ...data, contrato: e.target.value })} />
                 <InputRow label="Partida" value={data.partida} onChange={e => setData({ ...data, partida: e.target.value })} />
+                <InputRow label="Subpartida" value={data.subpartida} onChange={e => setData({ ...data, subpartida: e.target.value })} span={2} />
               </div>
             </div>
 
@@ -370,64 +487,20 @@ function JobWizard({ type, sections, currentUser, onCancel }: JobWizardProps) {
           </div>
         )}
 
-        {step === 2 && (
-          <div className="animate-in fade-in space-y-5">
-            <div className="p-4 rounded-xl" style={{ backgroundColor: 'var(--accent-light)', border: '1px solid var(--accent-border)' }}>
-              <p className="text-sm font-medium" style={{ color: 'var(--accent)' }}>
-                Marca las casillas de las acciones que realizaste. En el Excel aparecerá automáticamente una &quot;X&quot; en negritas.
-              </p>
-            </div>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-2 p-5 rounded-2xl" style={{ backgroundColor: 'var(--bg-secondary)', border: '1px solid var(--border)' }}>
-              {LISTA_CHECKLIST.map((item, index) => (
-                <label
-                  key={index}
-                  className="flex items-start gap-3 p-3 rounded-xl cursor-pointer transition-all duration-200"
-                  style={{ border: '1px solid transparent' }}
-                  onMouseEnter={e => (e.currentTarget.style.borderColor = 'var(--border)')}
-                  onMouseLeave={e => (e.currentTarget.style.borderColor = 'transparent')}
-                >
-                  <div className="relative mt-0.5 shrink-0">
-                    <input
-                      type="checkbox"
-                      checked={data.checklist[index]}
-                      onChange={e => {
-                        const newChecks = [...data.checklist]; newChecks[index] = e.target.checked;
-                        setData({ ...data, checklist: newChecks });
-                      }}
-                      className="sr-only"
-                    />
-                    <div
-                      className="w-5 h-5 rounded-md flex items-center justify-center transition-all duration-200"
-                      style={{
-                        backgroundColor: data.checklist[index] ? 'var(--success)' : 'transparent',
-                        border: `2px solid ${data.checklist[index] ? 'var(--success)' : 'var(--border-strong)'}`,
-                      }}
-                    >
-                      {data.checklist[index] && (
-                        <svg className="w-3 h-3" viewBox="0 0 12 12" fill="none">
-                          <path d="M2 6l3 3 5-5" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-                        </svg>
-                      )}
-                    </div>
-                  </div>
-                  <span className="text-sm leading-tight pt-0.5" style={{ color: data.checklist[index] ? 'var(--text-primary)' : 'var(--text-secondary)' }}>{item}</span>
-                </label>
-              ))}
-            </div>
-          </div>
-        )}
+        {step === 2 && renderChecklist(CHECKLIST_1, data.checklist1, 'checklist1')}
+        {step === 3 && renderChecklist(CHECKLIST_2, data.checklist2, 'checklist2')}
 
-        {step === 3 && (
+        {step === 4 && (
           <div className="space-y-5 animate-in fade-in">
             <div className="p-4 rounded-xl" style={{ backgroundColor: 'var(--warning-light)', border: '1px solid var(--warning)' }}>
               <h3 className="font-bold text-base mb-1" style={{ color: 'var(--warning)' }}>Evidencia Fotográfica</h3>
-              <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>Sube las fotos desde tu celular. El sistema las comprimirá y acomodará en la Página 3 del Excel.</p>
+              <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>Sube las fotos desde tu celular. El sistema las comprimirá y acomodará en la Página 4 del PDF.</p>
             </div>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
               {[
                 { key: 'antes1', label: 'Antes 1' }, { key: 'antes2', label: 'Antes 2' }, { key: 'antes3', label: 'Antes 3' },
-                { key: 'durante1', label: 'Durante 1' }, { key: 'durante2', label: 'Durante 2' }, { key: 'etiqueta', label: 'Etiqueta' },
-                { key: 'despues1', label: 'Después 1' }, { key: 'despues2', label: 'Después 2' }
+                { key: 'durante1', label: 'Durante 1' }, { key: 'durante2', label: 'Durante 2' },
+                { key: 'despues1', label: 'Después 1' }, { key: 'despues2', label: 'Después 2' },
               ].map((fotoInfo) => (
                 <div
                   key={fotoInfo.key}
@@ -468,7 +541,7 @@ function JobWizard({ type, sections, currentUser, onCancel }: JobWizardProps) {
           Atrás
         </button>
 
-        {step < 3 ? (
+        {step < 4 ? (
           <button
             onClick={() => setStep(step + 1)}
             className="px-8 py-3 rounded-xl font-bold text-sm transition-all duration-200"
@@ -476,7 +549,7 @@ function JobWizard({ type, sections, currentUser, onCancel }: JobWizardProps) {
             onMouseEnter={e => (e.currentTarget.style.backgroundColor = 'var(--accent-hover)')}
             onMouseLeave={e => (e.currentTarget.style.backgroundColor = 'var(--accent)')}
           >
-            Siguiente Página →
+            Siguiente →
           </button>
         ) : (
           <button
@@ -485,7 +558,7 @@ function JobWizard({ type, sections, currentUser, onCancel }: JobWizardProps) {
             className="px-8 py-4 rounded-xl font-bold text-base flex items-center gap-2 transition-all duration-200"
             style={{ backgroundColor: 'var(--success)', color: '#fff', opacity: isSaving ? 0.7 : 1 }}
           >
-            {isSaving ? 'Guardando Reporte...' : <><Save className="w-5 h-5" /> Terminar y Descargar Excel</>}
+            {isSaving ? 'Guardando...' : <><Save className="w-5 h-5" /> Guardar y Generar PDF</>}
           </button>
         )}
       </div>
