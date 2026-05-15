@@ -716,6 +716,19 @@ export const generarMhosA0143Buffer = async (reportData) => {
   sheetXml = sheetXml.replace('</worksheet>', rowBreaksXml + '</worksheet>');
 
   zip.file(sheetFile, sheetXml);
-  return await zip.generateAsync({ type: 'arraybuffer' });
+  const patchedBuffer = await zip.generateAsync({ type: 'arraybuffer' });
+
+  console.log('Buffer size:', patchedBuffer.byteLength);
+  console.log('Buffer starts with PK:',
+    new Uint8Array(patchedBuffer)[0] === 0x50 &&
+    new Uint8Array(patchedBuffer)[1] === 0x4B
+  );
+
+  if (!(new Uint8Array(patchedBuffer)[0] === 0x50 && new Uint8Array(patchedBuffer)[1] === 0x4B)) {
+    console.error('Buffer parcheado inválido, usando original');
+    return excelBuffer;
+  }
+
+  return patchedBuffer;
 };
 
