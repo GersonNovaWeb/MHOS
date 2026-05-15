@@ -24,6 +24,10 @@ tmp_dir    = sys.argv[4]
 profile = os.path.join(tmp_dir, 'lo_profile')
 profile_url = 'file:///' + profile.replace(os.sep, '/').lstrip('/')
 
+print('Ejecutando LibreOffice...', file=sys.stderr)
+print('xlsx_src existe:', os.path.exists(xlsx_src), file=sys.stderr)
+print('lo_path existe:', os.path.exists(lo_path), file=sys.stderr)
+
 result = subprocess.run(
   [lo_path, '--headless', '--norestore',
    f'-env:UserInstallation={profile_url}',
@@ -31,8 +35,10 @@ result = subprocess.run(
   capture_output=True, timeout=120
 )
 
+print('STDOUT:', result.stdout.decode('utf-8', errors='replace'), file=sys.stderr)
+print('STDERR:', result.stderr.decode('utf-8', errors='replace'), file=sys.stderr)
+
 if result.returncode != 0:
-  print('STDERR:', result.stderr.decode(), file=sys.stderr)
   sys.exit(1)
 
 pdf = xlsx_src.replace('.xlsx', '.pdf')
@@ -102,8 +108,10 @@ export async function POST(req: NextRequest) {
       },
     });
 
-  } catch (error) {
+  } catch (error: any) {
     console.error('[PDF ERROR]', error);
+    console.error('Python stderr:', error.stderr?.toString());
+    console.error('Python stdout:', error.stdout?.toString());
     const msg = error instanceof Error ? error.message : String(error);
     return NextResponse.json({ error: msg }, { status: 500 });
   } finally {
