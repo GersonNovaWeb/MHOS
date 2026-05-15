@@ -1,120 +1,61 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { execFile } from 'child_process';
-import fs from 'fs';
-import path from 'path';
-import os from 'os';
+import { exec } from 'child_process';
 import { promisify } from 'util';
+import { writeFile, readFile, unlink } from 'fs/promises';
+import { join } from 'path';
+import { tmpdir } from 'os';
+import { randomBytes } from 'crypto';
 
-const execFileAsync = promisify(execFile);
-
-const isWindows = os.platform() === 'win32';
-const libreOfficePath = isWindows
-  ? 'C:\\Program Files\\LibreOffice\\program\\soffice.exe'
-  : 'libreoffice';
-const pythonExe = isWindows ? 'python' : 'python3';
-
-const pythonScript = `
-import sys, subprocess, os, shutil
-
-xlsx_src   = sys.argv[1]
-output_pdf = sys.argv[2]
-lo_path    = sys.argv[3]
-tmp_dir    = sys.argv[4]
-
-profile = os.path.join(tmp_dir, 'lo_profile')
-profile_url = 'file:///' + profile.replace(os.sep, '/').lstrip('/')
-
-print('Ejecutando LibreOffice...', file=sys.stderr)
-print('xlsx_src existe:', os.path.exists(xlsx_src), file=sys.stderr)
-print('lo_path existe:', os.path.exists(lo_path), file=sys.stderr)
-
-result = subprocess.run(
-  [lo_path, '--headless', '--norestore',
-   f'-env:UserInstallation={profile_url}',
-   '--convert-to', 'pdf', xlsx_src, '--outdir', tmp_dir],
-  capture_output=True, timeout=120
-)
-
-print('STDOUT:', result.stdout.decode('utf-8', errors='replace'), file=sys.stderr)
-print('STDERR:', result.stderr.decode('utf-8', errors='replace'), file=sys.stderr)
-
-if result.returncode != 0:
-  sys.exit(1)
-
-pdf = xlsx_src.replace('.xlsx', '.pdf')
-if not os.path.exists(pdf):
-  print('PDF no generado', file=sys.stderr)
-  sys.exit(1)
-
-shutil.copy(pdf, output_pdf)
-print('OK')
-try: shutil.rmtree(profile)
-except: pass
-`;
-
-async function xlsxToPdf(inputPath: string, tempDir: string, profileId: string): Promise<string> {
-  const profileDir = path.join(tempDir, `lo_profile_${profileId}`);
-  const profileUrl = `file:///${profileDir.replace(/\\/g, '/').replace(/^\//, '')}`;
-  const outputPath = inputPath.replace(/\.xlsx$/, '.pdf');
-  await execFileAsync(libreOfficePath, [
-    '--headless', '--norestore', '--nofirststartwizard',
-    `-env:UserInstallation=${profileUrl}`,
-    '--convert-to', 'pdf', inputPath,
-    '--outdir', tempDir,
-  ], { timeout: 60000 });
-  if (!fs.existsSync(outputPath)) throw new Error('LibreOffice no generó el PDF');
-  return outputPath;
-}
+const execAsync = promisify(exec);
 
 export async function POST(req: NextRequest) {
-  const tempDir  = os.tmpdir();
-  const uniqueId = Date.now().toString();
-  const cleanup: string[] = [];
+  const id = randomBytes(8).toString('hex');
+  const tmpDir = tmpdir();
+  const xlsxPath = join(tmpDir, `reporte_${id}.xlsx`);
+  const pdfPath  = join(tmpDir, `reporte_${id}.pdf`);
 
   try {
-    const formData     = await req.formData();
-    const file          = formData.get('file') as Blob | null;
-    const isPreventivo  = formData.get('preventivo') === 'true';
+    const formData = await req.formData();
+    const file = formData.get('file') as File;
+    if (!file) return NextResponse.json({ error: 'No file' }, { status: 400 });
 
-    if (!file) return NextResponse.json({ error: 'No se envió archivo' }, { status: 400 });
+    const buffer = Buffer.from(await file.arrayBuffer());
+    await writeFile(xlsxPath, buffer);
 
-    const xlsxPath = path.join(tempDir, `reporte_${uniqueId}.xlsx`);
-    fs.writeFileSync(xlsxPath, Buffer.from(await file.arrayBuffer()));
-    cleanup.push(xlsxPath);
+    const loPath = process.platform === 'win32'
+      ? 'C:\\Program Files\\LibreOffice\\program\\soffice.exe'
+      : 'libreoffice';
 
-    let finalBuffer: Buffer;
+    const profileDir = join(tmpDir, `lo_profile_${id}`);
+    const profileUrl = process.platform === 'win32'
+      ? `file:///${profileDir.replace(/\\/g, '/')}`
+      : `file://${profileDir}`;
 
-    if (isPreventivo) {
-      const outputPdf = path.join(tempDir, `reporte_${uniqueId}_merged.pdf`);
-      cleanup.push(outputPdf);
-      const { stdout, stderr } = await execFileAsync(pythonExe, [
-        '-c', pythonScript,
-        xlsxPath, outputPdf, libreOfficePath, tempDir
-      ], { timeout: 300000 });
-      console.log('[PREVENTIVO] stdout:', stdout);
-      if (stderr) console.error('[PREVENTIVO] stderr:', stderr);
-      if (!fs.existsSync(outputPdf)) throw new Error(`Python no generó PDF. ${stdout} ${stderr}`);
-      finalBuffer = fs.readFileSync(outputPdf);
-    } else {
-      const pdfPath = await xlsxToPdf(xlsxPath, tempDir, uniqueId);
-      cleanup.push(pdfPath);
-      finalBuffer = fs.readFileSync(pdfPath);
-    }
+    const cmd = `"${loPath}" --headless --norestore -env:UserInstallation="${profileUrl}" --convert-to pdf "${xlsxPath}" --outdir "${tmpDir}"`;
 
-    return new NextResponse(finalBuffer, {
+    console.log('Ejecutando:', cmd);
+
+    const { stdout, stderr } = await execAsync(cmd, { timeout: 120000 });
+    console.log('LO stdout:', stdout);
+    console.log('LO stderr:', stderr);
+
+    const pdfData = await readFile(pdfPath);
+
+    return new NextResponse(pdfData, {
       headers: {
         'Content-Type': 'application/pdf',
-        'Content-Disposition': `attachment; filename="reporte.pdf"`,
+        'Content-Disposition': `attachment; filename="reporte_${id}.pdf"`,
       },
     });
 
-  } catch (error: any) {
-    console.error('[PDF ERROR]', error);
-    console.error('Python stderr:', error.stderr?.toString());
-    console.error('Python stdout:', error.stdout?.toString());
-    const msg = error instanceof Error ? error.message : String(error);
-    return NextResponse.json({ error: msg }, { status: 500 });
+  } catch (error: unknown) {
+    const err = error as Error & { stdout?: string; stderr?: string };
+    console.error('Error PDF:', err.message);
+    console.error('stdout:', err.stdout);
+    console.error('stderr:', err.stderr);
+    return NextResponse.json({ error: err.message }, { status: 500 });
   } finally {
-    for (const f of cleanup) { try { fs.unlinkSync(f); } catch(e) {} }
+    try { await unlink(xlsxPath); } catch {}
+    try { await unlink(pdfPath); } catch {}
   }
 }
