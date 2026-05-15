@@ -1,41 +1,49 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { exec } from 'child_process';
+import { execFile } from 'child_process';
 import { promisify } from 'util';
-import { writeFile, readFile, unlink } from 'fs/promises';
+import { writeFile, readFile, unlink, mkdir } from 'fs/promises';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { randomBytes } from 'crypto';
 
-const execAsync = promisify(exec);
+const execFileAsync = promisify(execFile);
 
 export async function POST(req: NextRequest) {
   const id = randomBytes(8).toString('hex');
-  const tmpDir = tmpdir();
-  const xlsxPath = join(tmpDir, `reporte_${id}.xlsx`);
-  const pdfPath  = join(tmpDir, `reporte_${id}.pdf`);
+  const tmp = tmpdir();
+  const xlsxPath   = join(tmp, `reporte_${id}.xlsx`);
+  const pdfPath    = join(tmp, `reporte_${id}.pdf`);
+  const profileDir = join(tmp, `lo_profile_${id}`);
 
   try {
     const formData = await req.formData();
     const file = formData.get('file') as File;
     if (!file) return NextResponse.json({ error: 'No file' }, { status: 400 });
 
-    const buffer = Buffer.from(await file.arrayBuffer());
-    await writeFile(xlsxPath, buffer);
+    await writeFile(xlsxPath, Buffer.from(await file.arrayBuffer()));
+    await mkdir(profileDir, { recursive: true });
 
     const loPath = process.platform === 'win32'
       ? 'C:\\Program Files\\LibreOffice\\program\\soffice.exe'
       : 'libreoffice';
 
-    const profileDir = join(tmpDir, `lo_profile_${id}`);
     const profileUrl = process.platform === 'win32'
       ? `file:///${profileDir.replace(/\\/g, '/')}`
       : `file://${profileDir}`;
 
-    const cmd = `"${loPath}" --headless --norestore -env:UserInstallation="${profileUrl}" --convert-to pdf "${xlsxPath}" --outdir "${tmpDir}"`;
+    const args = [
+      '--headless',
+      '--norestore',
+      `--env:UserInstallation=${profileUrl}`,
+      '--convert-to', 'pdf',
+      xlsxPath,
+      '--outdir', tmp,
+    ];
 
-    console.log('Ejecutando:', cmd);
+    console.log('LO path:', loPath);
+    console.log('LO args:', args);
 
-    const { stdout, stderr } = await execAsync(cmd, { timeout: 120000 });
+    const { stdout, stderr } = await execFileAsync(loPath, args, { timeout: 120000 });
     console.log('LO stdout:', stdout);
     console.log('LO stderr:', stderr);
 
@@ -56,6 +64,6 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: err.message }, { status: 500 });
   } finally {
     try { await unlink(xlsxPath); } catch {}
-    try { await unlink(pdfPath); } catch {}
+    try { await unlink(pdfPath);  } catch {}
   }
 }
