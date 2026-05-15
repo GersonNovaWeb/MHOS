@@ -1,12 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { execFile } from 'child_process';
+import { exec } from 'child_process';
 import { promisify } from 'util';
 import { writeFile, readFile, unlink, mkdir } from 'fs/promises';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { randomBytes } from 'crypto';
 
-const execFileAsync = promisify(execFile);
+const execAsync = promisify(exec);
 
 export async function POST(req: NextRequest) {
   const id = randomBytes(8).toString('hex');
@@ -31,25 +31,22 @@ export async function POST(req: NextRequest) {
       ? `file:///${profileDir.replace(/\\/g, '/')}`
       : `file://${profileDir}`;
 
-    const args = [
-      '--headless',
-      '--norestore',
-      `--env:UserInstallation=${profileUrl}`,
-      '--convert-to', 'pdf',
-      xlsxPath,
-      '--outdir', tmp,
-    ];
+    const cmd = process.platform === 'win32'
+      ? `"${loPath}" --headless --norestore "-env:UserInstallation=${profileUrl}" --convert-to pdf "${xlsxPath}" --outdir "${tmp}"`
+      : `"${loPath}" --headless --norestore -env:UserInstallation="${profileUrl}" --convert-to pdf "${xlsxPath}" --outdir "${tmp}"`;
 
-    console.log('LO path:', loPath);
-    console.log('LO args:', args);
+    console.log('Ejecutando:', cmd);
 
-    const { stdout, stderr } = await execFileAsync(loPath, args, { timeout: 120000 });
+    const { stdout, stderr } = await execAsync(cmd, {
+      timeout: 180000,
+      windowsHide: true,
+    });
     console.log('LO stdout:', stdout);
     console.log('LO stderr:', stderr);
 
     const pdfData = await readFile(pdfPath);
 
-    return new NextResponse(pdfData, {
+    return new NextResponse(new Uint8Array(pdfData), {
       headers: {
         'Content-Type': 'application/pdf',
         'Content-Disposition': `attachment; filename="reporte_${id}.pdf"`,
