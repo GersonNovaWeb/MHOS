@@ -223,15 +223,15 @@ const setEncabezadoReporte = (ws, d, rowOffset) => {
   ws.getCell(`C${r(10)}`).value = t(d.contrato,    50);
   setTipoServicio(ws, d.tipoServicio);
   ws.getCell(`C${r(23)}`).value = t(d.equipo,      50);
-  ws.getCell(`J${r(23)}`).value = t(d.numSerie,    50);
+  ws.getCell(`J${r(23)}`).value = t(d.numSerieEq || d.numSerie || '', 50);
   ws.getCell(`C${r(24)}`).value = t(d.marca,       50);
   ws.getCell(`C${r(25)}`).value = t(d.modelo,      50);
   ws.getCell(`J${r(25)}`).value = t(d.ubicacion,   50);
   ws.getCell(`C${r(27)}`).value = t(d.falla,      200);
   ws.getCell(`D${r(29)}`).value = t(d.condiciones,100);
   ws.getCell(`B${r(33)}`).value = t(d.trabajos,  1698);
-  ws.getCell(`E${r(45)}`).value = null;
-  ws.getCell(`E${r(45)}`).value = t(d.refacciones, 200);
+  const _refs = Array.isArray(d.refacciones) ? d.refacciones : (d.refacciones ? [d.refacciones] : []);
+  ws.getCell(`E${r(45)}`).value = _refs.filter(Boolean).join(', ');
 
   for (let i = 0; i < 6; i++) {
     const med = d.medicion?.[i];
@@ -242,6 +242,9 @@ const setEncabezadoReporte = (ws, d, rowOffset) => {
     ws.getCell(`F${row}`).value = t(med.modelo, 50);
     ws.getCell(`J${row}`).value = t(med.serie,  50);
   }
+  ws.getCell(`B${r(58)}`).value = t(d.firmaEntrega, 100);
+  ws.getCell(`D${r(58)}`).value = t(d.firmaRecibe,  100);
+  ws.getCell(`G${r(58)}`).value = t(d.firmaValida,  100);
 
 };
 
