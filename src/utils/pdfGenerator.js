@@ -2,6 +2,8 @@ import { generarExcelBuffer, generarDiagnosticoTorreBuffer, generarMhosA0143Buff
 
 export const generarPDF = async (reportData) => {
   try {
+    console.log('pdfGenerator - reportData.type:', reportData.type);
+    console.log('pdfGenerator - reportData:', JSON.stringify(reportData).substring(0, 200));
     const FileSaver = await import('file-saver');
     const saveAs = FileSaver.saveAs || FileSaver.default?.saveAs || FileSaver.default;
 
