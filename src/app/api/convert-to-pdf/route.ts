@@ -37,14 +37,23 @@ export async function POST(req: NextRequest) {
 
     console.log('Ejecutando:', cmd);
 
-    const { stdout, stderr } = await execAsync(cmd, {
-      timeout: 180000,
-      windowsHide: true,
-    });
-    console.log('LO stdout:', stdout);
-    console.log('LO stderr:', stderr);
+    try {
+      const { stdout, stderr } = await execAsync(cmd, { timeout: 180000, windowsHide: true });
+      console.log('LO stdout:', stdout);
+      console.log('LO stderr:', stderr);
+    } catch (loErr: unknown) {
+      const e = loErr as Error & { stdout?: string; stderr?: string };
+      console.warn('LO exit non-zero (verificando PDF):', e.message);
+      console.warn('LO stdout:', e.stdout);
+      console.warn('LO stderr:', e.stderr);
+    }
 
-    const pdfData = await readFile(pdfPath);
+    let pdfData: Buffer;
+    try {
+      pdfData = await readFile(pdfPath);
+    } catch {
+      throw new Error('LibreOffice no generó el PDF');
+    }
 
     return new NextResponse(new Uint8Array(pdfData), {
       headers: {

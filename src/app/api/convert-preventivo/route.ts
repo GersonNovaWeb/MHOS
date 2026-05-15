@@ -24,9 +24,16 @@ async function convertirPagina(xlsxPath: string, outDir: string, id: string): Pr
     ? `"${LO_PATH}" --headless --norestore "-env:UserInstallation=${profileUrl}" --convert-to pdf "${xlsxPath}" --outdir "${outDir}"`
     : `"${LO_PATH}" --headless --norestore -env:UserInstallation="${profileUrl}" --convert-to pdf "${xlsxPath}" --outdir "${outDir}"`;
 
-  const { stdout, stderr } = await execAsync(cmd, { timeout: 120000 });
-  console.log('[PREVENTIVO] stdout:', stdout);
-  console.log('[PREVENTIVO] stderr:', stderr);
+  try {
+    const { stdout, stderr } = await execAsync(cmd, { timeout: 120000, windowsHide: true });
+    console.log('[PREVENTIVO] stdout:', stdout);
+    console.log('[PREVENTIVO] stderr:', stderr);
+  } catch (loErr: unknown) {
+    const e = loErr as Error & { stdout?: string; stderr?: string };
+    console.warn('[PREVENTIVO] LO exit non-zero (verificando PDF):', e.message);
+    console.warn('[PREVENTIVO] stdout:', e.stdout);
+    console.warn('[PREVENTIVO] stderr:', e.stderr);
+  }
 
   const pdfPath = xlsxPath.replace('.xlsx', '.pdf');
   return pdfPath;
