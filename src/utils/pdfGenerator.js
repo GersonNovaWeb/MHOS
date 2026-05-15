@@ -5,18 +5,15 @@ export const generarPDF = async (reportData) => {
     const FileSaver = await import('file-saver');
     const saveAs = FileSaver.saveAs || FileSaver.default?.saveAs || FileSaver.default;
 
-    const isPreventivo  = reportData.type === 'preventivo';
-    const isDiagnostico = reportData.type === 'diagnostico' || reportData._generator === 'diagnostico';
+    const isPreventivo = reportData.type === 'preventivo';
     const xlsxType = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 
-    let excelBuffer;
-    if (isPreventivo) {
-      excelBuffer = await generarMhosA0143Buffer(reportData);
-    } else if (isDiagnostico) {
-      excelBuffer = await generarDiagnosticoTorreBuffer(reportData);
-    } else {
-      excelBuffer = await generarExcelBuffer(reportData);
-    }
+    const excelBuffer =
+      reportData.type === 'diagnostico'
+        ? await generarDiagnosticoTorreBuffer(reportData)
+        : reportData.type === 'preventivo'
+        ? await generarMhosA0143Buffer(reportData)
+        : await generarExcelBuffer(reportData);
 
     const formData = new FormData();
     formData.append('file', new Blob([excelBuffer], { type: xlsxType }), 'reporte.xlsx');
