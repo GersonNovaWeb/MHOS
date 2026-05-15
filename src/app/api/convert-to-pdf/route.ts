@@ -13,63 +13,37 @@ const libreOfficePath = isWindows
   : 'libreoffice';
 const pythonExe = isWindows ? 'python' : 'python3';
 
-const PYTHON_FULL = `
-import sys, os, zipfile, re, subprocess, shutil
-from openpyxl import load_workbook
-from openpyxl.worksheet.properties import WorksheetProperties, PageSetupProperties
+const pythonScript = `
+import sys, subprocess, os, shutil
 
 xlsx_src   = sys.argv[1]
 output_pdf = sys.argv[2]
 lo_path    = sys.argv[3]
 tmp_dir    = sys.argv[4]
 
-RANGES = [(1,59),(60,100),(101,141),(142,189)]
+profile = os.path.join(tmp_dir, 'lo_profile')
+profile_url = 'file:///' + profile.replace(os.sep, '/').lstrip('/')
 
-def make_page(src, start_row, end_row, dst):
-    wb = load_workbook(src)
-    ws = wb.worksheets[0]
-    total = ws.max_row
-    if end_row < total:
-        ws.delete_rows(end_row + 1, total - end_row)
-    if start_row > 1:
-        ws.delete_rows(1, start_row - 1)
-    ws.page_setup.paperSize   = 9
-    ws.page_setup.orientation = 'portrait'
-    ws.sheet_properties = WorksheetProperties()
-    ws.sheet_properties.pageSetUpPr = PageSetupProperties(fitToPage=True)
-    ws.page_setup.fitToWidth  = 1
-    ws.page_setup.fitToHeight = 1
-    wb.save(dst)
-    with zipfile.ZipFile(dst, 'r') as z:
-        files = {n: z.read(n) for n in z.namelist()}
-    xml = files['xl/worksheets/sheet1.xml'].decode('utf-8')
-    xml = xml.replace('<pageSetUpPr/>', '<pageSetUpPr fitToPage="1"/>')
-    xml = re.sub(r'<pageSetup[^/]*/>', '<pageSetup paperSize="9" orientation="portrait" fitToWidth="1" fitToHeight="1"/>', xml)
-    files['xl/worksheets/sheet1.xml'] = xml.encode('utf-8')
-    with zipfile.ZipFile(dst, 'w', 8) as z:
-        [z.writestr(n, d) for n, d in files.items()]
+result = subprocess.run(
+  [lo_path, '--headless', '--norestore',
+   f'-env:UserInstallation={profile_url}',
+   '--convert-to', 'pdf', xlsx_src, '--outdir', tmp_dir],
+  capture_output=True, timeout=120
+)
 
-pdf_files = []
-for i, (s, e) in enumerate(RANGES):
-    page_xlsx = os.path.join(tmp_dir, f'page_{i}.xlsx')
-    make_page(xlsx_src, s, e, page_xlsx)
-    profile = os.path.join(tmp_dir, f'lo_profile_{i}')
-    profile_url = 'file:///' + profile.replace(os.sep, '/').lstrip('/')
-    subprocess.run([lo_path,'--headless','--norestore',
-        f'-env:UserInstallation={profile_url}',
-        '--convert-to','pdf', page_xlsx, '--outdir', tmp_dir],
-        check=True, capture_output=True, timeout=60)
-    pdf = page_xlsx.replace('.xlsx','.pdf')
-    if os.path.exists(pdf):
-        pdf_files.append(pdf)
-    try: shutil.rmtree(profile)
-    except: pass
+if result.returncode != 0:
+  print('STDERR:', result.stderr.decode(), file=sys.stderr)
+  sys.exit(1)
 
-from pypdf import PdfWriter
-w = PdfWriter()
-[w.append(p) for p in pdf_files]
-w.write(output_pdf)
-print(f'OK: {len(pdf_files)} paginas')
+pdf = xlsx_src.replace('.xlsx', '.pdf')
+if not os.path.exists(pdf):
+  print('PDF no generado', file=sys.stderr)
+  sys.exit(1)
+
+shutil.copy(pdf, output_pdf)
+print('OK')
+try: shutil.rmtree(profile)
+except: pass
 `;
 
 async function xlsxToPdf(inputPath: string, tempDir: string, profileId: string): Promise<string> {
@@ -108,7 +82,7 @@ export async function POST(req: NextRequest) {
       const outputPdf = path.join(tempDir, `reporte_${uniqueId}_merged.pdf`);
       cleanup.push(outputPdf);
       const { stdout, stderr } = await execFileAsync(pythonExe, [
-        '-c', PYTHON_FULL,
+        '-c', pythonScript,
         xlsxPath, outputPdf, libreOfficePath, tempDir
       ], { timeout: 300000 });
       console.log('[PREVENTIVO] stdout:', stdout);
