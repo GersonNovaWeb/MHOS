@@ -250,14 +250,7 @@ const setEncabezadoReporte = (ws, d, rowOffset) => {
 
 export const construirWorkbookDiagnostico = async (reportData) => {
   const b = isProd ? '/Report_MHOS' : '';
-  const ExcelJS = (await import('exceljs')).default;
-
-  const response = await fetch(`${b}/templates/Formato_Diagnostico.xlsx`);
-  if (!response.ok) throw new Error(`Formato_Diagnostico.xlsx no encontrado: ${response.status}`);
-  const arrayBuffer = await response.arrayBuffer();
-
-  const workbook = new ExcelJS.Workbook();
-  await workbook.xlsx.load(arrayBuffer);
+  const { workbook } = await cargarFormatoDiagnostico(b);
   const ws = workbook.worksheets[0];
 
   // Cargar header y footer
@@ -392,14 +385,7 @@ export const generarDiagnosticoTorreBuffer = async (reportData) => {
 
 export const construirWorkbookMhosA0143 = async (reportData) => {
   const b = isProd ? '/Report_MHOS' : '';
-  const ExcelJS = (await import('exceljs')).default;
-
-  const response = await fetch(`${b}/templates/Formato_Preventivo.xlsx`);
-  if (!response.ok) throw new Error(`Formato_Preventivo.xlsx no encontrado`);
-  const arrayBuffer = await response.arrayBuffer();
-
-  const workbook = new ExcelJS.Workbook();
-  await workbook.xlsx.load(arrayBuffer);
+  const { workbook } = await cargarFormatoPreventivo(b);
   const ws = workbook.worksheets[0];
 
   const headerBase64 = await getBase64ImageFromUrl(`${b}/templates/header.png`);
@@ -435,6 +421,11 @@ export const construirWorkbookMhosA0143 = async (reportData) => {
 
   // Llenar datos
   setEncabezadoReporte(ws, reportData, 0);
+  const nombreTecnico = t(reportData.jobName || reportData.tecnico || '', 50);
+  ws.getCell('B55').value  = nombreTecnico;
+  ws.getCell('B96').value  = nombreTecnico;
+  ws.getCell('B137').value = nombreTecnico;
+  ws.getCell('B186').value = nombreTecnico;
   ws.getCell('B58').value = t(reportData.firmaEntrega, 100);
   ws.getCell('D58').value = t(reportData.firmaRecibe,  100);
   ws.getCell('G58').value = t(reportData.firmaValida,  100);
@@ -442,7 +433,7 @@ export const construirWorkbookMhosA0143 = async (reportData) => {
   // Sección 2 - Check List 1
   ws.getCell('D61').value = t(reportData.serial,   20);
   ws.getCell('D62').value = t(reportData.date,      20);
-  ws.getCell('B64').value = t(reportData.client,   100);
+  ws.getCell('C64').value = t(reportData.client,   100);
   ws.getCell('C70').value = t(reportData.equipo,    50);
   ws.getCell('J70').value = t(reportData.numSerieEq || reportData.numSerie || '', 50);
   ws.getCell('C71').value = t(reportData.marca,     50);
@@ -461,7 +452,7 @@ export const construirWorkbookMhosA0143 = async (reportData) => {
   // Sección 3 - Check List 2
   ws.getCell('D102').value = t(reportData.serial,   20);
   ws.getCell('D103').value = t(reportData.date,      20);
-  ws.getCell('B105').value = t(reportData.client,   100);
+  ws.getCell('C105').value = t(reportData.client,   100);
   ws.getCell('C111').value = t(reportData.equipo,    50);
   ws.getCell('J111').value = t(reportData.numSerieEq || reportData.numSerie || '', 50);
   ws.getCell('C112').value = t(reportData.marca,     50);
@@ -480,7 +471,7 @@ export const construirWorkbookMhosA0143 = async (reportData) => {
   // Sección 4 - Evidencia Fotográfica
   ws.getCell('D143').value = t(reportData.serial,      20);
   ws.getCell('D144').value = t(reportData.date,         20);
-  ws.getCell('B146').value = t(reportData.client,      100);
+  ws.getCell('C146').value = t(reportData.client,      100);
   ws.getCell('C148').value = t(reportData.contrato,     50);
   ws.getCell('F148').value = t(reportData.partida,      50);
   ws.getCell('J148').value = t(reportData.subpartida,   50);
@@ -507,15 +498,17 @@ export const construirWorkbookMhosA0143 = async (reportData) => {
   ws.getCell('D189').value = t(reportData.firmaRecibe,  100);
   ws.getCell('G189').value = t(reportData.firmaValida,  100);
 
-  ws.pageSetup.paperSize   = 9;
-  ws.pageSetup.orientation = 'portrait';
-  ws.pageSetup.fitToPage   = true;
-  ws.pageSetup.fitToWidth  = 1;
-  ws.pageSetup.fitToHeight = 4;
-  ws.pageSetup.printArea   = 'A1:M189';
+  ws.pageSetup.paperSize          = 1;
+  ws.pageSetup.orientation        = 'portrait';
+  ws.pageSetup.fitToPage          = false;
+  ws.pageSetup.scale              = 69;
+  ws.pageSetup.printArea          = 'A1:M189';
+  ws.pageSetup.horizontalCentered = false;
+  ws.pageSetup.verticalCentered   = false;
   ws.pageSetup.margins = {
-    left: 0.4, right: 0.4, top: 0.4,
-    bottom: 0.4, header: 0, footer: 0
+    left: 0.4, right: 0.4,
+    top: 0.55, bottom: 0.0,
+    header: 0.0, footer: 0.0
   };
 
   return workbook;
@@ -701,5 +694,27 @@ export const generarMhosA0143Buffers = async (reportData) => {
 
 export const generarMhosA0143Buffer = async (reportData) => {
   const workbook = await construirWorkbookMhosA0143(reportData);
-  return await workbook.xlsx.writeBuffer();
+  const excelBuffer = await workbook.xlsx.writeBuffer();
+
+  const JSZip = (await import('jszip')).default;
+  const zip = await JSZip.loadAsync(excelBuffer);
+
+  const sheetFiles = Object.keys(zip.files).filter(f =>
+    f.match(/xl\/worksheets\/sheet\d+\.xml/)
+  );
+  const sheetFile = sheetFiles[0];
+  let sheetXml = await zip.file(sheetFile).async('text');
+
+  const rowBreaksXml = '<rowBreaks count="4" manualBreakCount="4">' +
+    '<brk id="1" max="12" man="1"/>' +
+    '<brk id="59" max="12" man="1"/>' +
+    '<brk id="100" max="12" man="1"/>' +
+    '<brk id="141" max="12" man="1"/>' +
+    '</rowBreaks>';
+
+  sheetXml = sheetXml.replace(/<rowBreaks[^>]*>.*?<\/rowBreaks>/gs, '');
+  sheetXml = sheetXml.replace('</worksheet>', rowBreaksXml + '</worksheet>');
+
+  zip.file(sheetFile, sheetXml);
+  return await zip.generateAsync({ type: 'arraybuffer' });
 };
