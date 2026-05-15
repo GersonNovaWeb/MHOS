@@ -18,16 +18,16 @@ export const generarPDF = async (reportData) => {
         ? await generarMhosA0143Buffer(reportData)
         : await generarExcelBuffer(reportData);
 
-    const formData = new FormData();
-    formData.append('file', new Blob([excelBuffer], { type: xlsxType }), 'reporte.xlsx');
-    if (isPreventivo) formData.append('preventivo', 'true');
+    const form = new FormData();
+    form.append('file', new Blob([excelBuffer], { type: xlsxType }), 'reporte.xlsx');
 
     alert('Generando PDF... Esto puede tomar unos segundos.');
 
-    const response = await fetch('/api/convert-to-pdf', {
-      method: 'POST',
-      body: formData,
-    });
+    const endpoint = tipoReporte === 'preventivo'
+      ? '/api/convert-preventivo'
+      : '/api/convert-to-pdf';
+
+    const response = await fetch(endpoint, { method: 'POST', body: form });
 
     if (!response.ok) {
       const errBody = await response.json().catch(() => ({}));
