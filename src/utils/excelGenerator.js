@@ -250,7 +250,12 @@ const setEncabezadoReporte = (ws, d, rowOffset) => {
 
 export const construirWorkbookDiagnostico = async (reportData) => {
   const b = isProd ? '/Report_MHOS' : '';
-  const { workbook } = await cargarFormatoDiagnostico(b);
+  const ExcelJS = (await import('exceljs')).default;
+  const response = await fetch(`${b}/templates/Formatos.xlsx`);
+  if (!response.ok) throw new Error(`Formatos.xlsx no encontrado`);
+  const arrayBuffer = await response.arrayBuffer();
+  const workbook = new ExcelJS.Workbook();
+  await workbook.xlsx.load(arrayBuffer);
   const ws = workbook.worksheets[1];
 
   // Cargar header y footer
