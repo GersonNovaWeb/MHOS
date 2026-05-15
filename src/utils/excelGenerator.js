@@ -34,8 +34,8 @@ const cropToSquare = (base64Str) => new Promise((resolve) => {
 
 const cargarFormatoPreventivo = async (base) => {
   const ExcelJS = (await import('exceljs')).default;
-  const response = await fetch(`${base}/templates/Formatos.xlsx`);
-  if (!response.ok) throw new Error(`Formatos.xlsx no encontrado: ${response.status}`);
+  const response = await fetch(`${base}/templates/Formato_Preventivo.xlsx`);
+  if (!response.ok) throw new Error(`Formato_Preventivo.xlsx no encontrado: ${response.status}`);
   const arrayBuffer = await response.arrayBuffer();
   const workbook = new ExcelJS.Workbook();
   await workbook.xlsx.load(arrayBuffer);
@@ -386,7 +386,7 @@ export const generarDiagnosticoTorreBuffer = async (reportData) => {
 export const construirWorkbookMhosA0143 = async (reportData) => {
   const b = isProd ? '/Report_MHOS' : '';
   const { workbook } = await cargarFormatoPreventivo(b);
-  const ws = workbook.worksheets[2];
+  const ws = workbook.worksheets[0];
 
   const headerBase64 = await getBase64ImageFromUrl(`${b}/templates/header.png`);
   const footerBase64 = await getBase64ImageFromUrl(`${b}/templates/footer.png`);
