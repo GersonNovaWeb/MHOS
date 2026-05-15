@@ -694,41 +694,6 @@ export const generarMhosA0143Buffers = async (reportData) => {
 
 export const generarMhosA0143Buffer = async (reportData) => {
   const workbook = await construirWorkbookMhosA0143(reportData);
-  const excelBuffer = await workbook.xlsx.writeBuffer();
-
-  const JSZip = (await import('jszip')).default;
-  const zip = await JSZip.loadAsync(excelBuffer);
-
-  const sheetFiles = Object.keys(zip.files).filter(f =>
-    f.match(/xl\/worksheets\/sheet\d+\.xml/)
-  );
-  const sheetFile = sheetFiles[0];
-  let sheetXml = await zip.file(sheetFile).async('text');
-
-  const rowBreaksXml = '<rowBreaks count="4" manualBreakCount="4">' +
-    '<brk id="1" max="12" man="1"/>' +
-    '<brk id="59" max="12" man="1"/>' +
-    '<brk id="100" max="12" man="1"/>' +
-    '<brk id="141" max="12" man="1"/>' +
-    '</rowBreaks>';
-
-  sheetXml = sheetXml.replace(/<rowBreaks[^>]*>.*?<\/rowBreaks>/gs, '');
-  sheetXml = sheetXml.replace('</worksheet>', rowBreaksXml + '</worksheet>');
-
-  zip.file(sheetFile, sheetXml);
-  const patchedBuffer = await zip.generateAsync({ type: 'arraybuffer' });
-
-  console.log('Buffer size:', patchedBuffer.byteLength);
-  console.log('Buffer starts with PK:',
-    new Uint8Array(patchedBuffer)[0] === 0x50 &&
-    new Uint8Array(patchedBuffer)[1] === 0x4B
-  );
-
-  if (!(new Uint8Array(patchedBuffer)[0] === 0x50 && new Uint8Array(patchedBuffer)[1] === 0x4B)) {
-    console.error('Buffer parcheado inválido, usando original');
-    return excelBuffer;
-  }
-
-  return patchedBuffer;
+  return await workbook.xlsx.writeBuffer();
 };
 
