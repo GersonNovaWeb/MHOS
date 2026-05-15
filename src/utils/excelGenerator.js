@@ -390,13 +390,18 @@ export const generarDiagnosticoTorreBuffer = async (reportData) => {
 
 export const construirWorkbookMhosA0143 = async (reportData) => {
   const b = isProd ? '/Report_MHOS' : '';
-  const { workbook } = await cargarFormatoPreventivo(b);
+  const ExcelJS = (await import('exceljs')).default;
+  const response = await fetch(`${b}/templates/Formato_Preventivo.xlsx`);
+  if (!response.ok) throw new Error(`Formato_Preventivo.xlsx no encontrado: ${response.status}`);
+  const arrayBuffer = await response.arrayBuffer();
+  const workbook = new ExcelJS.Workbook();
+  await workbook.xlsx.load(arrayBuffer);
   const ws = workbook.worksheets[0];
 
   const headerBase64 = await getBase64ImageFromUrl(`${b}/templates/header.png`);
   const footerBase64 = await getBase64ImageFromUrl(`${b}/templates/footer.png`);
 
-  // Alturas fila 1 de cada página
+  // Alturas fila inicio de cada página
   ws.getRow(1).height   = 75;
   ws.getRow(60).height  = 75;
   ws.getRow(101).height = 75;
@@ -424,62 +429,55 @@ export const construirWorkbookMhosA0143 = async (reportData) => {
     ].forEach(pos => ws.addImage(fId, { ...pos, editAs: 'absolute' }));
   }
 
-  // Llenar datos
+  // Sección 1 — Reporte principal
   setEncabezadoReporte(ws, reportData, 0);
+
+  // Nombre técnico en cada página
   const nombreTecnico = t(reportData.jobName || reportData.tecnico || '', 50);
   ws.getCell('B55').value  = nombreTecnico;
   ws.getCell('B96').value  = nombreTecnico;
   ws.getCell('B137').value = nombreTecnico;
   ws.getCell('B186').value = nombreTecnico;
-  ws.getCell('B58').value = t(reportData.firmaEntrega, 100);
-  ws.getCell('D58').value = t(reportData.firmaRecibe,  100);
-  ws.getCell('G58').value = t(reportData.firmaValida,  100);
 
-  // Sección 2 - Check List 1
-  ws.getCell('D61').value = t(reportData.serial,   20);
-  ws.getCell('D62').value = t(reportData.date,      20);
-  ws.getCell('C64').value = t(reportData.client,   100);
-  ws.getCell('C70').value = t(reportData.equipo,    50);
-  ws.getCell('J70').value = t(reportData.numSerieEq || reportData.numSerie || '', 50);
-  ws.getCell('C71').value = t(reportData.marca,     50);
-  ws.getCell('C72').value = t(reportData.modelo,    50);
-  ws.getCell('G72').value = t(reportData.ubicacion, 50);
+  // Sección 2 — Check List 1 (filas 61–99)
+  ws.getCell('D61').value = t(reportData.serial,    20);
+  ws.getCell('D62').value = t(reportData.date,       20);
+  ws.getCell('C64').value = t(reportData.client,    100);
+  ws.getCell('C70').value = t(reportData.equipo,     50);
+  ws.getCell('J70').value = t(reportData.numSerie,   50);
+  ws.getCell('C71').value = t(reportData.marca,      50);
+  ws.getCell('C72').value = t(reportData.modelo,     50);
+  ws.getCell('J72').value = t(reportData.ubicacion,  50);
   for (let i = 0; i < 18; i++) {
     if (reportData.checklist1?.[i]) {
       ws.getCell(`L${77+i}`).value = 'X';
       ws.getCell(`L${77+i}`).font = { bold: true };
     }
   }
-  ws.getCell('B99').value = t(reportData.firmaEntrega, 100);
-  ws.getCell('D99').value = t(reportData.firmaRecibe,  100);
-  ws.getCell('G99').value = t(reportData.firmaValida,  100);
 
-  // Sección 3 - Check List 2
-  ws.getCell('D102').value = t(reportData.serial,   20);
-  ws.getCell('D103').value = t(reportData.date,      20);
-  ws.getCell('C105').value = t(reportData.client,   100);
-  ws.getCell('C111').value = t(reportData.equipo,    50);
-  ws.getCell('J111').value = t(reportData.numSerieEq || reportData.numSerie || '', 50);
-  ws.getCell('C112').value = t(reportData.marca,     50);
-  ws.getCell('C113').value = t(reportData.modelo,    50);
-  ws.getCell('G113').value = t(reportData.ubicacion, 50);
+  // Sección 3 — Check List 2 (filas 102–140)
+  ws.getCell('D102').value = t(reportData.serial,    20);
+  ws.getCell('D103').value = t(reportData.date,       20);
+  ws.getCell('C105').value = t(reportData.client,    100);
+  ws.getCell('C111').value = t(reportData.equipo,     50);
+  ws.getCell('J111').value = t(reportData.numSerie,   50);
+  ws.getCell('C112').value = t(reportData.marca,      50);
+  ws.getCell('C113').value = t(reportData.modelo,     50);
+  ws.getCell('J113').value = t(reportData.ubicacion,  50);
   for (let i = 0; i < 12; i++) {
     if (reportData.checklist2?.[i]) {
       ws.getCell(`L${118+i}`).value = 'X';
       ws.getCell(`L${118+i}`).font = { bold: true };
     }
   }
-  ws.getCell('B140').value = t(reportData.firmaEntrega, 100);
-  ws.getCell('D140').value = t(reportData.firmaRecibe,  100);
-  ws.getCell('G140').value = t(reportData.firmaValida,  100);
 
-  // Sección 4 - Evidencia Fotográfica
-  ws.getCell('D143').value = t(reportData.serial,      20);
-  ws.getCell('D144').value = t(reportData.date,         20);
-  ws.getCell('C146').value = t(reportData.client,      100);
-  ws.getCell('C148').value = t(reportData.contrato,     50);
-  ws.getCell('F148').value = t(reportData.partida,      50);
-  ws.getCell('J148').value = t(reportData.subpartida,   50);
+  // Sección 4 — Evidencia Fotográfica (filas 143–189)
+  ws.getCell('D143').value = t(reportData.serial,     20);
+  ws.getCell('D144').value = t(reportData.date,        20);
+  ws.getCell('C146').value = t(reportData.client,     100);
+  ws.getCell('C148').value = t(reportData.contrato,    50);
+  ws.getCell('F148').value = t(reportData.partida,     50);
+  ws.getCell('J148').value = t(reportData.subpartida,  50);
 
   // Fotos
   const addImg = async (b64, col, row) => {
@@ -499,15 +497,12 @@ export const construirWorkbookMhosA0143 = async (reportData) => {
     await addImg(reportData.fotos.despues1, 1, 178);
     await addImg(reportData.fotos.despues2, 4, 178);
   }
-  ws.getCell('B189').value = t(reportData.firmaEntrega, 100);
-  ws.getCell('D189').value = t(reportData.firmaRecibe,  100);
-  ws.getCell('G189').value = t(reportData.firmaValida,  100);
 
-  ws.pageSetup.paperSize          = 1;
-  ws.pageSetup.orientation        = 'portrait';
-  ws.pageSetup.fitToPage          = false;
-  ws.pageSetup.scale              = 69;
-  ws.pageSetup.printArea          = 'A1:M189';
+  ws.pageSetup.paperSize   = 1;
+  ws.pageSetup.orientation = 'portrait';
+  ws.pageSetup.fitToPage   = false;
+  ws.pageSetup.scale       = 69;
+  ws.pageSetup.printArea   = 'A1:M189';
   ws.pageSetup.horizontalCentered = false;
   ws.pageSetup.verticalCentered   = false;
   ws.pageSetup.margins = {
@@ -723,3 +718,4 @@ export const generarMhosA0143Buffer = async (reportData) => {
   zip.file(sheetFile, sheetXml);
   return await zip.generateAsync({ type: 'arraybuffer' });
 };
+
