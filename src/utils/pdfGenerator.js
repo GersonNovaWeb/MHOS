@@ -7,13 +7,14 @@ export const generarPDF = async (reportData) => {
     const FileSaver = await import('file-saver');
     const saveAs = FileSaver.saveAs || FileSaver.default?.saveAs || FileSaver.default;
 
-    const isPreventivo = reportData.type === 'preventivo';
+    const tipoReporte = (reportData.type || '').toLowerCase();
+    const isPreventivo = tipoReporte === 'preventivo';
     const xlsxType = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 
     const excelBuffer =
-      reportData.type === 'diagnostico'
+      tipoReporte === 'diagnostico'
         ? await generarDiagnosticoTorreBuffer(reportData)
-        : reportData.type === 'preventivo'
+        : tipoReporte === 'preventivo'
         ? await generarMhosA0143Buffer(reportData)
         : await generarExcelBuffer(reportData);
 

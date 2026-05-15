@@ -1538,7 +1538,7 @@ function AdminJobWizard({ type, sections, currentUser, onCancel }: AdminJobWizar
       const count = snapshot.size + 1;
       const serial = `MHOS-SSM-EL-${String(count).padStart(4, '0')}`;
       const finalReport = {
-        serial, type: type || 'Preventivo',
+        serial, type: (type || 'preventivo').toLowerCase(),
         jobId: currentUser.id, jobName: currentUser.name || currentUser.username,
         date: new Date().toISOString().split('T')[0], createdAt: new Date().toISOString(),
         ...data
