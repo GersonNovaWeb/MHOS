@@ -442,12 +442,12 @@ export const construirWorkbookMhosA0143 = async (reportData) => {
   // Sección 2 — Check List 1 (filas 61–99)
   ws.getCell('D61').value = t(reportData.serial,    20);
   ws.getCell('D62').value = t(reportData.date,       20);
-  ws.getCell('C64').value = t(reportData.client,    100);
+  ws.getCell('B64').value = t(reportData.client,    100);
   ws.getCell('C70').value = t(reportData.equipo,     50);
-  ws.getCell('J70').value = t(reportData.numSerie,   50);
+  ws.getCell('J70').value = t(reportData.numSerieEq || reportData.numSerie || '', 50);
   ws.getCell('C71').value = t(reportData.marca,      50);
   ws.getCell('C72').value = t(reportData.modelo,     50);
-  ws.getCell('J72').value = t(reportData.ubicacion,  50);
+  ws.getCell('G72').value = t(reportData.ubicacion,  50);
   for (let i = 0; i < 18; i++) {
     if (reportData.checklist1?.[i]) {
       ws.getCell(`L${77+i}`).value = 'X';
@@ -458,12 +458,12 @@ export const construirWorkbookMhosA0143 = async (reportData) => {
   // Sección 3 — Check List 2 (filas 102–140)
   ws.getCell('D102').value = t(reportData.serial,    20);
   ws.getCell('D103').value = t(reportData.date,       20);
-  ws.getCell('C105').value = t(reportData.client,    100);
+  ws.getCell('B105').value = t(reportData.client,    100);
   ws.getCell('C111').value = t(reportData.equipo,     50);
-  ws.getCell('J111').value = t(reportData.numSerie,   50);
+  ws.getCell('J111').value = t(reportData.numSerieEq || reportData.numSerie || '', 50);
   ws.getCell('C112').value = t(reportData.marca,      50);
   ws.getCell('C113').value = t(reportData.modelo,     50);
-  ws.getCell('J113').value = t(reportData.ubicacion,  50);
+  ws.getCell('G113').value = t(reportData.ubicacion,  50);
   for (let i = 0; i < 12; i++) {
     if (reportData.checklist2?.[i]) {
       ws.getCell(`L${118+i}`).value = 'X';
@@ -474,7 +474,7 @@ export const construirWorkbookMhosA0143 = async (reportData) => {
   // Sección 4 — Evidencia Fotográfica (filas 143–189)
   ws.getCell('D143').value = t(reportData.serial,     20);
   ws.getCell('D144').value = t(reportData.date,        20);
-  ws.getCell('C146').value = t(reportData.client,     100);
+  ws.getCell('B146').value = t(reportData.client,     100);
   ws.getCell('C148').value = t(reportData.contrato,    50);
   ws.getCell('F148').value = t(reportData.partida,     50);
   ws.getCell('J148').value = t(reportData.subpartida,  50);
