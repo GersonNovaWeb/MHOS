@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { exec } from 'child_process';
 import { promisify } from 'util';
-import { writeFile, readFile, unlink, mkdir } from 'fs/promises';
+import { writeFile, readFile, unlink, mkdir, rm } from 'fs/promises';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { randomBytes } from 'crypto';
@@ -12,49 +12,39 @@ const LO_PATH = process.platform === 'win32'
   ? 'C:\\Program Files\\LibreOffice\\program\\soffice.exe'
   : 'libreoffice';
 
-async function convertirPagina(xlsxPath: string, outDir: string, id: string): Promise<string> {
-  const profileDir = join(outDir, `profile_${id}`);
-  await mkdir(profileDir, { recursive: true });
-
-  const profileUrl = process.platform === 'win32'
-    ? `file:///${profileDir.replace(/\\/g, '/')}`
-    : `file://${profileDir}`;
-
-  const cmd = process.platform === 'win32'
-    ? `"${LO_PATH}" --headless --norestore "-env:UserInstallation=${profileUrl}" --convert-to pdf "${xlsxPath}" --outdir "${outDir}"`
-    : `"${LO_PATH}" --headless --norestore -env:UserInstallation="${profileUrl}" --convert-to pdf "${xlsxPath}" --outdir "${outDir}"`;
-
-  try {
-    const { stdout, stderr } = await execAsync(cmd, { timeout: 120000, windowsHide: true });
-    console.log('[PREVENTIVO] stdout:', stdout);
-    console.log('[PREVENTIVO] stderr:', stderr);
-  } catch (loErr: unknown) {
-    const e = loErr as Error & { stdout?: string; stderr?: string };
-    console.warn('[PREVENTIVO] LO exit non-zero (verificando PDF):', e.message);
-    console.warn('[PREVENTIVO] stdout:', e.stdout);
-    console.warn('[PREVENTIVO] stderr:', e.stderr);
-  }
-
-  const pdfPath = xlsxPath.replace('.xlsx', '.pdf');
-  return pdfPath;
-}
+const SCRIPT_PATH = join(process.cwd(), 'scripts', 'split_convert.py');
 
 export async function POST(req: NextRequest) {
   const id = randomBytes(8).toString('hex');
-  const tmpDir = tmpdir();
-  const xlsxPath = join(tmpDir, `preventivo_${id}.xlsx`);
-  const pdfPath  = join(tmpDir, `preventivo_${id}.pdf`);
+  const baseTmp  = tmpdir();
+  const reqTmp   = join(baseTmp, `preventivo_${id}`);
+  const xlsxPath = join(reqTmp, `input.xlsx`);
+  const pdfPath  = join(reqTmp, `output.pdf`);
 
   try {
     const formData = await req.formData();
     const file = formData.get('file') as File;
     if (!file) return NextResponse.json({ error: 'No file' }, { status: 400 });
 
-    const buffer = Buffer.from(await file.arrayBuffer());
-    await writeFile(xlsxPath, buffer);
+    await mkdir(reqTmp, { recursive: true });
+    await writeFile(xlsxPath, Buffer.from(await file.arrayBuffer()));
 
-    const resultPdf = await convertirPagina(xlsxPath, tmpDir, id);
-    const pdfData = await readFile(resultPdf);
+    const cmd = `python "${SCRIPT_PATH}" "${xlsxPath}" "${pdfPath}" "${LO_PATH}" "${reqTmp}"`;
+    console.log('[PREVENTIVO] Ejecutando:', cmd);
+
+    try {
+      const { stdout, stderr } = await execAsync(cmd, { timeout: 300000, windowsHide: true });
+      console.log('[PREVENTIVO] stdout:', stdout);
+      if (stderr) console.warn('[PREVENTIVO] stderr:', stderr);
+    } catch (pyErr: unknown) {
+      const e = pyErr as Error & { stdout?: string; stderr?: string };
+      console.error('[PREVENTIVO] Python error:', e.message);
+      console.error('[PREVENTIVO] stdout:', e.stdout);
+      console.error('[PREVENTIVO] stderr:', e.stderr);
+      throw new Error(`Python script falló: ${e.message}\n${e.stderr ?? ''}`);
+    }
+
+    const pdfData = await readFile(pdfPath);
 
     return new NextResponse(new Uint8Array(pdfData), {
       headers: {
@@ -64,13 +54,10 @@ export async function POST(req: NextRequest) {
     });
 
   } catch (error: unknown) {
-    const err = error as Error & { stdout?: string; stderr?: string };
+    const err = error as Error;
     console.error('[PREVENTIVO] Error:', err.message);
-    console.error('[PREVENTIVO] stdout:', err.stdout);
-    console.error('[PREVENTIVO] stderr:', err.stderr);
     return NextResponse.json({ error: err.message }, { status: 500 });
   } finally {
-    try { await unlink(xlsxPath); } catch {}
-    try { await unlink(pdfPath); } catch {}
+    try { await rm(reqTmp, { recursive: true, force: true }); } catch {}
   }
 }
