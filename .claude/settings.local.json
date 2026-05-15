@@ -2,7 +2,20 @@
   "permissions": {
     "allow": [
       "Bash(node fix-plantilla.mjs)",
-      "Bash(npx tsc *)"
+      "Bash(npx tsc *)",
+      "Bash(git add *)",
+      "Bash(git commit -m ' *)",
+      "Bash(git push *)",
+      "PowerShell(python -c \"import openpyxl; print\\(openpyxl.__version__\\)\")",
+      "PowerShell(pip install *)",
+      "PowerShell(python -c \"import openpyxl; print\\('openpyxl:', openpyxl.__version__\\); from pypdf import PdfReader; print\\('pypdf: OK'\\)\")",
+      "PowerShell(python -c \"from pypdf import PdfReader; r=PdfReader\\('$env:TEMP\\\\test_p2.pdf'\\); print\\('Páginas:', len\\(r.pages\\)\\)\")",
+      "PowerShell(python -c \"import openpyxl; print\\('openpyxl OK:', openpyxl.__version__\\)\")",
+      "PowerShell(python -c \"import openpyxl; print\\('OK:', openpyxl.__version__\\)\"})",
+      "Bash(git commit *)",
+      "Bash(pip install *)",
+      "Bash(python -c \"from pypdf import PdfWriter; print\\('pypdf OK'\\)\")",
+      "Bash(python -c \"from openpyxl import load_workbook; print\\('openpyxl OK'\\)\")"
     ]
   }
 }
