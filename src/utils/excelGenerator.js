@@ -1,5 +1,5 @@
 const isProd = process.env.NODE_ENV === 'production';
-const base = isProd ? '/Report_MHOS' : '';
+const base = '';
 
 const getBase64ImageFromUrl = async (imageUrl) => {
   try {
@@ -31,6 +31,16 @@ const cropToSquare = (base64Str) => new Promise((resolve) => {
   img.onerror = () => resolve(base64Str);
   img.src = `data:image/jpeg;base64,${base64Str}`;
 });
+
+const markChecklistCell = (ws, address) => {
+  const cell = ws.getCell(address);
+  cell.value = 'X';
+  cell.font = { name: 'Arial', size: 11, bold: true };
+  cell.alignment = { horizontal: 'center', vertical: 'middle' };
+};
+
+const PHOTO_SIZE = 100;
+const PREVENTIVO_PHOTO_SIZE = 120;
 
 const cargarFormatoPreventivo = async (base) => {
   const ExcelJS = (await import('exceljs')).default;
@@ -109,9 +119,7 @@ export const construirWorkbook = async (reportData) => {
 
   for (let i = 0; i < 28; i++) {
     if (reportData.checklist?.[i]) {
-      const celda = ws.getCell(`K${88+i}`);
-      celda.value = 'X';
-      celda.font = { bold: true };
+      markChecklistCell(ws, `K${88+i}`);
     }
   }
 
@@ -200,16 +208,27 @@ export const generarExcelBuffer = async (reportData) => {
 const t = (v, max) => (v ?? '').toString().trim().slice(0, max);
 
 const setTipoServicio = (ws, tipo, offset = 0) => {
+  [
+    `C${14 + offset}`, `C${17 + offset}`,
+    `D${14 + offset}`, `D${17 + offset}`,
+    `F${14 + offset}`, `F${17 + offset}`,
+    `G${14 + offset}`, `G${17 + offset}`,
+    `J${14 + offset}`, `J${17 + offset}`,
+    `L${14 + offset}`, `L${17 + offset}`,
+  ].forEach(address => {
+    ws.getCell(address).value = null;
+  });
+
   const map = {
-    preventivo:   `D${14 + offset}`,
-    correctivo:   `D${17 + offset}`,
-    garantia:     `G${14 + offset}`,
-    diagnostico:  `G${17 + offset}`,
-    instalacion:  `I${14 + offset}`,
-    capacitacion: `I${17 + offset}`,
+    preventivo:   `C${14 + offset}`,
+    correctivo:   `C${17 + offset}`,
+    garantia:     `F${14 + offset}`,
+    diagnostico:  `F${17 + offset}`,
+    instalacion:  `J${14 + offset}`,
+    capacitacion: `J${17 + offset}`,
   };
   const addr = map[tipo];
-  if (addr) ws.getCell(addr).value = 'X';
+  if (addr) markChecklistCell(ws, addr);
 };
 
 // ─── Diagnóstico Torre — Formato_Diagnostico.xlsx, worksheets[0] ─────────────
@@ -220,7 +239,14 @@ const setEncabezadoReporte = (ws, d, rowOffset) => {
   ws.getCell(`D${r(3)}`).value  = t(d.date,        20);
   ws.getCell(`C${r(5)}`).value  = t(d.client,     100);
   ws.getCell(`C${r(6)}`).value  = t(d.direccion,  150);
-  ws.getCell(`C${r(10)}`).value = t(d.contrato,    50);
+
+  const contratoCell = ws.getCell(`C${r(10)}`);
+  contratoCell.value = t(d.contrato, 50);
+  contratoCell.font = { name: 'Avenir Next LT Pro', family: 2, size: 9, color: { theme: 1 } };
+  contratoCell.alignment = { horizontal: 'left', vertical: 'middle' };
+  ws.getCell(`D${r(10)}`).font = contratoCell.font;
+  ws.getCell(`D${r(10)}`).alignment = contratoCell.alignment;
+
   setTipoServicio(ws, d.tipoServicio);
   ws.getCell(`C${r(23)}`).value = t(d.equipo,      50);
   ws.getCell(`J${r(23)}`).value = t(d.numSerieEq || d.numSerie || '', 50);
@@ -249,7 +275,7 @@ const setEncabezadoReporte = (ws, d, rowOffset) => {
 };
 
 export const construirWorkbookDiagnostico = async (reportData) => {
-  const b = isProd ? '/Report_MHOS' : '';
+  const b = '';
   const ExcelJS = (await import('exceljs')).default;
   const response = await fetch(`${b}/templates/Formato_Diagnostico.xlsx`);
   if (!response.ok) throw new Error(`Formato_Diagnostico.xlsx no encontrado: ${response.status}`);
@@ -257,13 +283,8 @@ export const construirWorkbookDiagnostico = async (reportData) => {
   const workbook = new ExcelJS.Workbook();
   await workbook.xlsx.load(arrayBuffer);
   const ws = workbook.worksheets[0];
-
-  // Cargar header y footer
   const headerBase64 = await getBase64ImageFromUrl(`${b}/templates/header.png`);
   const footerBase64 = await getBase64ImageFromUrl(`${b}/templates/footer.png`);
-
-  console.log('Header cargado:', !!headerBase64);
-  console.log('Footer cargado:', !!footerBase64);
 
   // Alturas originales exactas del Excel
   const rowHeights = {
@@ -389,7 +410,7 @@ export const generarDiagnosticoTorreBuffer = async (reportData) => {
 // ─── MHOS-A0143 Preventivo — Formato_Preventivo.xlsx, worksheets[0] ──────────
 
 export const construirWorkbookMhosA0143 = async (reportData) => {
-  const b = isProd ? '/Report_MHOS' : '';
+  const b = '';
   const ExcelJS = (await import('exceljs')).default;
   const response = await fetch(`${b}/templates/Formato_Preventivo.xlsx`);
   if (!response.ok) throw new Error(`Formato_Preventivo.xlsx no encontrado: ${response.status}`);
@@ -406,28 +427,6 @@ export const construirWorkbookMhosA0143 = async (reportData) => {
   ws.getRow(60).height  = 75;
   ws.getRow(101).height = 75;
   ws.getRow(142).height = 75;
-
-  // Headers
-  if (headerBase64) {
-    const hId = workbook.addImage({ base64: headerBase64, extension: 'png' });
-    [
-      { tl: { col: 1, row: 0   }, br: { col: 11, row: 1   } },
-      { tl: { col: 1, row: 60  }, br: { col: 11, row: 61  } },
-      { tl: { col: 1, row: 101 }, br: { col: 11, row: 102 } },
-      { tl: { col: 1, row: 142 }, br: { col: 11, row: 143 } },
-    ].forEach(pos => ws.addImage(hId, { ...pos, editAs: 'absolute' }));
-  }
-
-  // Footers
-  if (footerBase64) {
-    const fId = workbook.addImage({ base64: footerBase64, extension: 'png' });
-    [
-      { tl: { col: 1, row: 57  }, br: { col: 11, row: 62  } },
-      { tl: { col: 1, row: 97  }, br: { col: 11, row: 102 } },
-      { tl: { col: 1, row: 138 }, br: { col: 11, row: 143 } },
-      { tl: { col: 1, row: 184 }, br: { col: 11, row: 190 } },
-    ].forEach(pos => ws.addImage(fId, { ...pos, editAs: 'absolute' }));
-  }
 
   // Sección 1 — Reporte principal
   setEncabezadoReporte(ws, reportData, 0);
@@ -450,8 +449,7 @@ export const construirWorkbookMhosA0143 = async (reportData) => {
   ws.getCell('G72').value = t(reportData.ubicacion,  50);
   for (let i = 0; i < 18; i++) {
     if (reportData.checklist1?.[i]) {
-      ws.getCell(`L${77+i}`).value = 'X';
-      ws.getCell(`L${77+i}`).font = { bold: true };
+      markChecklistCell(ws, `L${77+i}`);
     }
   }
 
@@ -466,8 +464,7 @@ export const construirWorkbookMhosA0143 = async (reportData) => {
   ws.getCell('G113').value = t(reportData.ubicacion,  50);
   for (let i = 0; i < 12; i++) {
     if (reportData.checklist2?.[i]) {
-      ws.getCell(`L${118+i}`).value = 'X';
-      ws.getCell(`L${118+i}`).font = { bold: true };
+      markChecklistCell(ws, `L${118+i}`);
     }
   }
 
@@ -485,24 +482,29 @@ export const construirWorkbookMhosA0143 = async (reportData) => {
     try {
       const sq = await cropToSquare(b64);
       const id = workbook.addImage({ base64: sq, extension: 'jpeg' });
-      ws.addImage(id, { tl:{col,row}, ext:{width:180,height:180}, editAs:'absolute' });
+      ws.addImage(id, { tl:{col,row}, ext:{width:PREVENTIVO_PHOTO_SIZE,height:PREVENTIVO_PHOTO_SIZE}, editAs:'absolute' });
     } catch(e) {}
   };
   if (reportData.fotos) {
-    await addImg(reportData.fotos.antes1,   1, 152);
-    await addImg(reportData.fotos.antes2,   4, 152);
-    await addImg(reportData.fotos.antes3,   7, 152);
-    await addImg(reportData.fotos.durante1, 1, 165);
-    await addImg(reportData.fotos.durante2, 4, 165);
-    await addImg(reportData.fotos.despues1, 1, 178);
-    await addImg(reportData.fotos.despues2, 4, 178);
+    await addImg(reportData.fotos.antes1,   1, 153);
+    await addImg(reportData.fotos.antes2,   2, 153);
+    await addImg(reportData.fotos.antes3,   3, 153);
+    await addImg(reportData.fotos.durante1, 7, 153);
+    await addImg(reportData.fotos.durante2, 10, 153);
+    await addImg(reportData.fotos.despues1, 1, 167);
+    await addImg(reportData.fotos.despues2, 2, 167);
   }
 
   ws.pageSetup.paperSize   = 1;
   ws.pageSetup.orientation = 'portrait';
-  ws.pageSetup.fitToPage   = false;
-  ws.pageSetup.scale       = 69;
+  ws.pageSetup.fitToPage   = true;
+  ws.pageSetup.scale       = 73;
+  ws.pageSetup.fitToWidth  = 1;
+  ws.pageSetup.fitToHeight = 0;
   ws.pageSetup.printArea   = 'A1:M189';
+  ws.getRow(59).addPageBreak();
+  ws.getRow(100).addPageBreak();
+  ws.getRow(141).addPageBreak();
   ws.pageSetup.horizontalCentered = false;
   ws.pageSetup.verticalCentered   = false;
   ws.pageSetup.margins = {
@@ -529,7 +531,7 @@ export const generarMhosA0143 = async (reportData) => {
 };
 
 export const generarMhosA0143Buffers = async (reportData) => {
-  const b = isProd ? '/Report_MHOS' : '';
+  const b = '';
   const ExcelJS = (await import('exceljs')).default;
 
   const response = await fetch(`${b}/templates/Formato_Preventivo.xlsx`);
@@ -545,12 +547,15 @@ export const generarMhosA0143Buffers = async (reportData) => {
     return wb;
   };
 
-  const applyPageSetup = (ws, printArea) => {
-    ws.pageSetup.paperSize   = 9;
+  const applyPageSetup = (ws, printArea, startRow, endRow) => {
+    for (let row = 1; row <= 189; row += 1) {
+      ws.getRow(row).hidden = row < startRow || row > endRow;
+    }
+    ws.pageSetup.paperSize   = 1;
     ws.pageSetup.orientation = 'portrait';
-    ws.pageSetup.fitToPage   = false;
-    ws.pageSetup.scale       = 69;
+    ws.pageSetup.fitToPage   = true;
     ws.pageSetup.fitToWidth  = 1;
+    ws.pageSetup.fitToHeight = 1;
     ws.pageSetup.printArea   = printArea;
     ws.pageSetup.margins = { left: 0.4, right: 0.4, top: 0.4, bottom: 0.4, header: 0, footer: 0 };
   };
@@ -559,19 +564,11 @@ export const generarMhosA0143Buffers = async (reportData) => {
     const wb = await loadWb();
     const ws = wb.worksheets[0];
     ws.getRow(1).height = 75;
-    if (headerBase64) {
-      const hId = wb.addImage({ base64: headerBase64, extension: 'png' });
-      ws.addImage(hId, { tl: { col: 1, row: 0 }, br: { col: 11, row: 1 }, editAs: 'absolute' });
-    }
-    if (footerBase64) {
-      const fId = wb.addImage({ base64: footerBase64, extension: 'png' });
-      ws.addImage(fId, { tl: { col: 1, row: 57 }, br: { col: 11, row: 62 }, editAs: 'absolute' });
-    }
     setEncabezadoReporte(ws, d, 0);
     ws.getCell('B58').value = t(d.firmaEntrega, 100);
     ws.getCell('D58').value = t(d.firmaRecibe,  100);
     ws.getCell('G58').value = t(d.firmaValida,  100);
-    applyPageSetup(ws, 'A1:M59');
+    applyPageSetup(ws, 'A1:M59', 1, 59);
     return wb.xlsx.writeBuffer();
   };
 
@@ -579,14 +576,6 @@ export const generarMhosA0143Buffers = async (reportData) => {
     const wb = await loadWb();
     const ws = wb.worksheets[0];
     ws.getRow(60).height = 75;
-    if (headerBase64) {
-      const hId = wb.addImage({ base64: headerBase64, extension: 'png' });
-      ws.addImage(hId, { tl: { col: 1, row: 59 }, br: { col: 11, row: 60 }, editAs: 'absolute' });
-    }
-    if (footerBase64) {
-      const fId = wb.addImage({ base64: footerBase64, extension: 'png' });
-      ws.addImage(fId, { tl: { col: 1, row: 97 }, br: { col: 11, row: 102 }, editAs: 'absolute' });
-    }
     ws.getCell('D61').value = t(d.serial,    20);
     ws.getCell('D62').value = t(d.date,       20);
     ws.getCell('B64').value = t(d.client,    100);
@@ -597,14 +586,13 @@ export const generarMhosA0143Buffers = async (reportData) => {
     ws.getCell('G72').value = t(d.ubicacion,                     50);
     for (let i = 0; i < 18; i++) {
       if (d.checklist1?.[i]) {
-        ws.getCell(`L${77 + i}`).value = 'X';
-        ws.getCell(`L${77 + i}`).font  = { bold: true };
+        markChecklistCell(ws, `L${77 + i}`);
       }
     }
     ws.getCell('B99').value = t(d.firmaEntrega, 100);
     ws.getCell('D99').value = t(d.firmaRecibe,  100);
     ws.getCell('G99').value = t(d.firmaValida,  100);
-    applyPageSetup(ws, 'A60:M100');
+    applyPageSetup(ws, 'A60:M100', 60, 100);
     return wb.xlsx.writeBuffer();
   };
 
@@ -612,14 +600,6 @@ export const generarMhosA0143Buffers = async (reportData) => {
     const wb = await loadWb();
     const ws = wb.worksheets[0];
     ws.getRow(101).height = 75;
-    if (headerBase64) {
-      const hId = wb.addImage({ base64: headerBase64, extension: 'png' });
-      ws.addImage(hId, { tl: { col: 1, row: 100 }, br: { col: 11, row: 101 }, editAs: 'absolute' });
-    }
-    if (footerBase64) {
-      const fId = wb.addImage({ base64: footerBase64, extension: 'png' });
-      ws.addImage(fId, { tl: { col: 1, row: 138 }, br: { col: 11, row: 143 }, editAs: 'absolute' });
-    }
     ws.getCell('D102').value = t(d.serial,    20);
     ws.getCell('D103').value = t(d.date,       20);
     ws.getCell('B105').value = t(d.client,    100);
@@ -630,14 +610,13 @@ export const generarMhosA0143Buffers = async (reportData) => {
     ws.getCell('G113').value = t(d.ubicacion,  50);
     for (let i = 0; i < 12; i++) {
       if (d.checklist2?.[i]) {
-        ws.getCell(`L${118 + i}`).value = 'X';
-        ws.getCell(`L${118 + i}`).font  = { bold: true };
+        markChecklistCell(ws, `L${118 + i}`);
       }
     }
     ws.getCell('B140').value = t(d.firmaEntrega, 100);
     ws.getCell('D140').value = t(d.firmaRecibe,  100);
     ws.getCell('G140').value = t(d.firmaValida,  100);
-    applyPageSetup(ws, 'A101:M141');
+    applyPageSetup(ws, 'A101:M141', 101, 141);
     return wb.xlsx.writeBuffer();
   };
 
@@ -645,14 +624,6 @@ export const generarMhosA0143Buffers = async (reportData) => {
     const wb = await loadWb();
     const ws = wb.worksheets[0];
     ws.getRow(142).height = 75;
-    if (headerBase64) {
-      const hId = wb.addImage({ base64: headerBase64, extension: 'png' });
-      ws.addImage(hId, { tl: { col: 1, row: 141 }, br: { col: 11, row: 142 }, editAs: 'absolute' });
-    }
-    if (footerBase64) {
-      const fId = wb.addImage({ base64: footerBase64, extension: 'png' });
-      ws.addImage(fId, { tl: { col: 1, row: 184 }, br: { col: 11, row: 190 }, editAs: 'absolute' });
-    }
     ws.getCell('D143').value = t(d.serial,     20);
     ws.getCell('D144').value = t(d.date,        20);
     ws.getCell('B146').value = t(d.client,     100);
@@ -664,22 +635,22 @@ export const generarMhosA0143Buffers = async (reportData) => {
       try {
         const sq = await cropToSquare(b64);
         const id = wb.addImage({ base64: sq, extension: 'jpeg' });
-        ws.addImage(id, { tl: { col, row }, ext: { width: 180, height: 180 }, editAs: 'absolute' });
+        ws.addImage(id, { tl: { col, row }, ext: { width: PREVENTIVO_PHOTO_SIZE, height: PREVENTIVO_PHOTO_SIZE }, editAs: 'absolute' });
       } catch(e) {}
     };
     if (d.fotos) {
-      await addFoto(d.fotos.antes1,   1, 152);
-      await addFoto(d.fotos.antes2,   4, 152);
-      await addFoto(d.fotos.antes3,   7, 152);
-      await addFoto(d.fotos.durante1, 1, 165);
-      await addFoto(d.fotos.durante2, 4, 165);
-      await addFoto(d.fotos.despues1, 1, 178);
-      await addFoto(d.fotos.despues2, 4, 178);
+      await addFoto(d.fotos.antes1,   1, 153);
+      await addFoto(d.fotos.antes2,   2, 153);
+      await addFoto(d.fotos.antes3,   3, 153);
+      await addFoto(d.fotos.durante1, 7, 153);
+      await addFoto(d.fotos.durante2, 10, 153);
+      await addFoto(d.fotos.despues1, 1, 167);
+      await addFoto(d.fotos.despues2, 2, 167);
     }
     ws.getCell('B189').value = t(d.firmaEntrega, 100);
     ws.getCell('D189').value = t(d.firmaRecibe,  100);
     ws.getCell('G189').value = t(d.firmaValida,  100);
-    applyPageSetup(ws, 'A142:M189');
+    applyPageSetup(ws, 'A142:M189', 142, 189);
     return wb.xlsx.writeBuffer();
   };
 
@@ -696,4 +667,3 @@ export const generarMhosA0143Buffer = async (reportData) => {
   const workbook = await construirWorkbookMhosA0143(reportData);
   return await workbook.xlsx.writeBuffer();
 };
-

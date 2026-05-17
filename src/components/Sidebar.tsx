@@ -1,7 +1,7 @@
 "use client";
 
 import React from 'react';
-import { FolderPlus, FileText, Users, MessageSquare, LogOut, FileSpreadsheet, X, Zap } from 'lucide-react';
+import { FolderPlus, FileText, Users, MessageSquare, LogOut, FileSpreadsheet, X, Zap, UserCircle, Bell, BarChart, Archive } from 'lucide-react';
 import { User } from '../types';
 
 interface SidebarProps {
@@ -20,7 +20,9 @@ export default function Sidebar({ currentUser, onLogout, activeTab, setActiveTab
     if (setIsOpen) setIsOpen(false);
   };
 
-  const initials = (currentUser.name || 'U').split(' ').map(w => w[0]).slice(0, 2).join('').toUpperCase();
+  const initials = (currentUser.name || currentUser.username || 'U').split(' ').filter(Boolean).map(w => w[0]).slice(0, 2).join('').toUpperCase();
+  const roleLabel = currentUser.role === 'admin' ? 'Administrador' : 'Tecnico';
+  const profileColor = currentUser.profileColor || 'var(--accent)';
 
   return (
     <>
@@ -80,12 +82,19 @@ export default function Sidebar({ currentUser, onLogout, activeTab, setActiveTab
                 <NavItem icon={<FileText />} label="Buzón de Reportes" active={activeTab === 'buzon'} onClick={() => handleNav('buzon')} />
                 <NavItem icon={<FileSpreadsheet />} label="Hacer Reporte" active={activeTab === 'hacer_reporte' || activeTab === 'form'} onClick={() => handleNav('hacer_reporte')} />
                 <NavItem icon={<FolderPlus />} label="Gestión Secciones" active={activeTab === 'secciones'} onClick={() => handleNav('secciones')} />
+                <NavItem icon={<Bell />} label="Notificaciones" active={activeTab === 'notificaciones'} onClick={() => handleNav('notificaciones')} />
+                <NavItem icon={<BarChart />} label="Metricas" active={activeTab === 'metricas'} onClick={() => handleNav('metricas')} />
+                <NavItem icon={<Archive />} label="Respaldos" active={activeTab === 'respaldos'} onClick={() => handleNav('respaldos')} />
                 <NavItem icon={<Users />} label="Usuarios y Accesos" active={activeTab === 'usuarios'} onClick={() => handleNav('usuarios')} />
+                <NavItem icon={<UserCircle />} label="Mi Perfil" active={activeTab === 'perfil'} onClick={() => handleNav('perfil')} />
                 <NavItem icon={<MessageSquare />} label="Chat con Jobs" active={activeTab === 'chat'} onClick={() => handleNav('chat')} />
               </>
             ) : (
               <>
+                {currentUser.canAccessReports && <NavItem icon={<FileText />} label="Buzon de Reportes" active={activeTab === 'buzon'} onClick={() => handleNav('buzon')} />}
                 <NavItem icon={<FileSpreadsheet />} label="Hacer Formatos" active={activeTab === 'menu' || activeTab === 'form'} onClick={() => handleNav('menu')} />
+                {currentUser.canManageSections && <NavItem icon={<FolderPlus />} label="Gestion Secciones" active={activeTab === 'secciones'} onClick={() => handleNav('secciones')} />}
+                <NavItem icon={<UserCircle />} label="Mi Perfil" active={activeTab === 'perfil'} onClick={() => handleNav('perfil')} />
                 <NavItem icon={<MessageSquare />} label="Soporte (Chat)" active={activeTab === 'chat'} onClick={() => handleNav('chat')} />
               </>
             )}
@@ -96,17 +105,21 @@ export default function Sidebar({ currentUser, onLogout, activeTab, setActiveTab
         <div className="p-4" style={{ borderTop: '1px solid var(--border)' }}>
           <div className="flex items-center gap-3 px-3 py-3 rounded-xl mb-3" style={{ backgroundColor: 'var(--bg-secondary)' }}>
             <div
-              className="w-10 h-10 rounded-full flex items-center justify-center font-bold text-sm shrink-0 text-white"
-              style={{ backgroundColor: 'var(--accent)' }}
+              className="w-10 h-10 rounded-full flex items-center justify-center font-bold text-sm shrink-0 text-white overflow-hidden"
+              style={{ backgroundColor: profileColor }}
             >
-              {initials}
+              {currentUser.photoUrl ? (
+                <img src={currentUser.photoUrl} alt={currentUser.name || 'Foto de perfil'} className="w-full h-full object-cover" />
+              ) : (
+                initials
+              )}
             </div>
             <div className="overflow-hidden flex-1 min-w-0">
               <p className="text-sm font-semibold truncate" style={{ color: 'var(--text-primary)' }}>
                 {currentUser.name || 'Usuario'}
               </p>
-              <p className="text-[10px] uppercase tracking-widest font-medium" style={{ color: 'var(--text-muted)' }}>
-                {currentUser.role}
+              <p className="text-[10px] uppercase tracking-widest font-medium truncate" style={{ color: 'var(--text-muted)' }}>
+                {currentUser.nickname ? currentUser.nickname + ' / ' + roleLabel : roleLabel}
               </p>
             </div>
           </div>

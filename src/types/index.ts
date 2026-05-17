@@ -1,9 +1,16 @@
 export interface User {
   id: string;
+  authUid?: string;
   username: string;
   password?: string;
   role: 'admin' | 'job';
   name: string;
+  nickname?: string;
+  phone?: string;
+  photoUrl?: string;
+  profileColor?: string;
+  canAccessReports?: boolean;
+  canManageSections?: boolean;
 }
 
 export interface Section {
@@ -49,6 +56,39 @@ export interface NotificationMsg {
   id: number;
   message: string;
   time: string;
+}
+
+export interface ReportChangeItem {
+  field: string;
+  label: string;
+  before: string;
+  after: string;
+}
+
+export interface ReportHistoryItem {
+  id: string;
+  reportId: string;
+  serial: string;
+  action: 'created' | 'edited';
+  actorId: string;
+  actorName: string;
+  actorRole: 'admin' | 'job';
+  createdAt: string;
+  changes: ReportChangeItem[];
+}
+
+export interface AppNotification {
+  id: string;
+  type: 'report_created';
+  title: string;
+  message: string;
+  reportId?: string;
+  serial?: string;
+  actorId?: string;
+  actorName?: string;
+  targetRole?: 'admin';
+  isRead?: boolean;
+  createdAt?: string;
 }
 
 export interface MedicionEquipo {

@@ -1,32 +1,134 @@
 "use client";
 
 import React, { useState } from 'react';
-import { FolderPlus, Download, Plus, Eye, EyeOff, ChevronDown, ChevronUp, Tag, FileText, Users, MessageSquare, BarChart, FileSpreadsheet, Camera, CheckSquare, Save, Search, Printer, Pencil, Trash2, X } from 'lucide-react';
-import { collection, addDoc, getDocs, updateDoc, deleteDoc, doc, getDoc } from 'firebase/firestore';
+import { FolderPlus, Download, Plus, Eye, EyeOff, ChevronDown, ChevronUp, Tag, FileText, Users, MessageSquare, BarChart, FileSpreadsheet, Camera, CheckSquare, Save, Search, Printer, Pencil, Trash2, X, History, Bell, Archive, Database } from 'lucide-react';
+import { collection, addDoc, getDocs, updateDoc, deleteDoc, doc, getDoc, query, where } from 'firebase/firestore';
 import { db } from '../lib/firebase';
-import { generarExcel, generarExcelBuffer, generarDiagnosticoTorreBuffer, generarMhosA0143Buffer, generarDiagnosticoTorre, generarMhosA0143 } from '../utils/excelGenerator';
+import { generarExcelBuffer, generarDiagnosticoTorreBuffer, generarMhosA0143Buffers } from '../utils/excelGenerator';
 import { generarPDF } from '../utils/pdfGenerator';
 import ChatSystem from './ChatSystem';
-import { User, Section, Report, Message, ReportTorre } from '../types';
+import { User, Section, Report, Message, ReportTorre, ReportChangeItem, ReportHistoryItem, AppNotification } from '../types';
+
+
+const REPORT_FIELD_LABELS: Record<string, string> = {
+  serial: 'Folio',
+  date: 'Fecha',
+  client: 'Cliente',
+  direccion: 'Direccion',
+  contrato: 'Contrato',
+  partida: 'Partida',
+  subpartida: 'Subpartida',
+  tipoServicio: 'Tipo de servicio',
+  equipo: 'Equipo',
+  marca: 'Marca',
+  modelo: 'Modelo',
+  numSerie: 'Numero de serie',
+  ubicacion: 'Ubicacion',
+  falla: 'Falla reportada',
+  condiciones: 'Condiciones iniciales',
+  trabajos: 'Descripcion del mantenimiento',
+  refacciones: 'Refacciones',
+  medicion: 'Equipo de medicion',
+  tecnico: 'Tecnico',
+  firmaCoordinador: 'Coordinador',
+  firmaVobo: 'Vo.Bo.',
+  firmaAdministrador: 'Administrador de unidad',
+  selloUnidad: 'Sello de unidad',
+  checklist1: 'Checklist 1',
+  checklist2: 'Checklist 2',
+  fotos: 'Evidencia fotografica',
+  sectionId: 'Carpeta',
+};
+
+const reportAuditFields = Object.keys(REPORT_FIELD_LABELS);
+
+const filledPhotoCount = (value: unknown) => {
+  if (!value || typeof value !== 'object') return 0;
+  return Object.values(value as Record<string, unknown>).filter(Boolean).length;
+};
+
+const filledMedicionCount = (value: unknown) => {
+  if (!Array.isArray(value)) return 0;
+  return value.filter(item => item && typeof item === 'object' && Object.values(item as Record<string, unknown>).some(Boolean)).length;
+};
+
+const formatAuditValue = (field: string, value: unknown): string => {
+  if (value === undefined || value === null || value === '') return '-';
+  if (field === 'fotos') return filledPhotoCount(value) + ' foto(s)';
+  if (field === 'medicion') return filledMedicionCount(value) + ' equipo(s)';
+  if (field === 'checklist1' || field === 'checklist2') return Array.isArray(value) ? value.filter(Boolean).length + ' marcado(s)' : '-';
+  if (Array.isArray(value)) return JSON.stringify(value);
+  if (typeof value === 'object') return JSON.stringify(value);
+  const textValue = String(value);
+  return textValue.length > 120 ? textValue.slice(0, 117) + '...' : textValue;
+};
+
+const buildReportChanges = (before: Record<string, unknown> | undefined, after: Record<string, unknown>): ReportChangeItem[] => {
+  if (!before) return [{ field: 'created', label: 'Reporte', before: '-', after: 'Creado' }];
+  return reportAuditFields.flatMap(field => {
+    const prev = formatAuditValue(field, before[field]);
+    const next = formatAuditValue(field, after[field]);
+    return prev === next ? [] : [{ field, label: REPORT_FIELD_LABELS[field], before: prev, after: next }];
+  });
+};
+
+const saveReportHistory = async (params: { reportId: string; serial: string; action: 'created' | 'edited'; actor: User; changes: ReportChangeItem[] }) => {
+  await addDoc(collection(db, 'reportHistory'), {
+    reportId: params.reportId,
+    serial: params.serial,
+    action: params.action,
+    actorId: params.actor.id,
+    actorName: params.actor.name || params.actor.username,
+    actorRole: params.actor.role,
+    changes: params.changes.length ? params.changes : [{ field: 'none', label: 'Cambios', before: '-', after: 'Sin cambios detectados' }],
+    createdAt: new Date().toISOString(),
+  });
+};
+
+const createReportNotification = async (reportId: string, report: { serial: string; type: string; client: string }, actor: User) => {
+  if (actor.role !== 'job') return;
+  await addDoc(collection(db, 'notifications'), {
+    type: 'report_created',
+    title: 'Nuevo reporte creado',
+    message: (actor.name || actor.username) + ' creo el reporte ' + report.serial + ' para ' + report.client + '.',
+    reportId,
+    serial: report.serial,
+    reportType: report.type,
+    actorId: actor.id,
+    actorName: actor.name || actor.username,
+    targetRole: 'admin',
+    isRead: false,
+    createdAt: new Date().toISOString(),
+  });
+};
+
+type AdminTab = 'buzon' | 'secciones' | 'usuarios' | 'chat' | 'hacer_reporte' | 'notificaciones' | 'metricas' | 'respaldos';
 
 interface AdminDashboardProps {
   sections: Section[];
   reports: Report[];
   messages: Message[];
   setMessages: React.Dispatch<React.SetStateAction<Message[]>>;
+  notifications?: AppNotification[];
   currentUser: User;
   users: User[];
   activeTab?: string;
   setActiveTab?: React.Dispatch<React.SetStateAction<string>>;
+  allowedTabs?: AdminTab[];
+  canEditReports?: boolean;
 }
 
-export default function AdminDashboard({ sections, reports, messages, setMessages, currentUser, users, activeTab, setActiveTab }: AdminDashboardProps) {
+export default function AdminDashboard({ sections, reports, messages, setMessages, notifications = [], currentUser, users, activeTab, setActiveTab, allowedTabs, canEditReports = true }: AdminDashboardProps) {
   const [localActiveTab, setLocalActiveTab] = useState<string>('buzon');
   const currentTab = activeTab !== undefined ? activeTab : localActiveTab;
   const setCurrentTab = setActiveTab !== undefined ? setActiveTab : setLocalActiveTab;
+  const allowedTabList: AdminTab[] = allowedTabs ?? ['buzon', 'secciones', 'usuarios', 'chat', 'hacer_reporte', 'notificaciones', 'metricas', 'respaldos'];
+  const canUseTab = (tab: AdminTab) => allowedTabList.includes(tab);
+  const canUseReportWorkflow = canUseTab('hacer_reporte') && canEditReports;
   const [searchTerm, setSearchTerm] = useState<string>('');
   const [editingReport, setEditingReport] = useState<(Report & Partial<ReportTorre>) | null>(null);
   const [defaultSectionId, setDefaultSectionId] = useState<string>('');
+  const unreadNotifications = notifications.filter(n => !n.isRead).length;
 
   const handleEditReport = async (report: Report) => {
     try {
@@ -53,11 +155,14 @@ export default function AdminDashboard({ sections, reports, messages, setMessage
         className="flex gap-1 overflow-x-auto pb-0 scrollbar-hide rounded-2xl p-1 -mx-1"
         style={{ backgroundColor: 'var(--bg-tertiary)' }}
       >
-        <TabButton active={currentTab === 'buzon'} onClick={() => setCurrentTab('buzon')} icon={<FileText />} label="Buzón Reportes" />
-        <TabButton active={currentTab === 'secciones'} onClick={() => setCurrentTab('secciones')} icon={<FolderPlus />} label="Gestión Carpetas" />
-        <TabButton active={currentTab === 'usuarios'} onClick={() => setCurrentTab('usuarios')} icon={<Users />} label="Cuentas Personal" />
-        <TabButton active={currentTab === 'chat'} onClick={() => setCurrentTab('chat')} icon={<MessageSquare />} label="Chat Central" />
-        <TabButton active={currentTab === 'hacer_reporte' || currentTab === 'form' || currentTab === 'form_preventivo' || currentTab === 'form_diagnostico' || currentTab === 'edit_report'} onClick={() => setCurrentTab('hacer_reporte')} icon={<FileSpreadsheet />} label="Hacer Reporte" />
+        {canUseTab('buzon') && <TabButton active={currentTab === 'buzon'} onClick={() => setCurrentTab('buzon')} icon={<FileText />} label="Buzon Reportes" />}
+        {canUseTab('secciones') && <TabButton active={currentTab === 'secciones'} onClick={() => setCurrentTab('secciones')} icon={<FolderPlus />} label="Gestion Carpetas" />}
+        {canUseTab('notificaciones') && <TabButton active={currentTab === 'notificaciones'} onClick={() => setCurrentTab('notificaciones')} icon={<Bell />} label={unreadNotifications > 0 ? `Notificaciones (${unreadNotifications})` : 'Notificaciones'} />}
+        {canUseTab('metricas') && <TabButton active={currentTab === 'metricas'} onClick={() => setCurrentTab('metricas')} icon={<BarChart />} label="Metricas" />}
+        {canUseTab('respaldos') && <TabButton active={currentTab === 'respaldos'} onClick={() => setCurrentTab('respaldos')} icon={<Archive />} label="Respaldos" />}
+        {canUseTab('usuarios') && <TabButton active={currentTab === 'usuarios'} onClick={() => setCurrentTab('usuarios')} icon={<Users />} label="Cuentas Personal" />}
+        {canUseTab('chat') && <TabButton active={currentTab === 'chat'} onClick={() => setCurrentTab('chat')} icon={<MessageSquare />} label="Chat Central" />}
+        {canUseTab('hacer_reporte') && <TabButton active={currentTab === 'hacer_reporte' || currentTab === 'form' || currentTab === 'form_preventivo' || currentTab === 'form_diagnostico' || currentTab === 'edit_report'} onClick={() => setCurrentTab('hacer_reporte')} icon={<FileSpreadsheet />} label="Hacer Reporte" />}
       </div>
 
       {/* Content card */}
@@ -65,7 +170,7 @@ export default function AdminDashboard({ sections, reports, messages, setMessage
         className="rounded-2xl p-5 md:p-8 min-h-[600px]"
         style={{ backgroundColor: 'var(--bg-card)', border: '1px solid var(--border)', boxShadow: 'var(--shadow)' }}
       >
-        {currentTab === 'buzon' && (
+        {currentTab === 'buzon' && canUseTab('buzon') && (
           <div className="space-y-6 animate-in fade-in">
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-5 mb-2" style={{ borderBottom: '1px solid var(--border)' }}>
               <div>
@@ -112,7 +217,7 @@ export default function AdminDashboard({ sections, reports, messages, setMessage
                 {sections.map((section: Section) => {
                   const secReps = filteredReports?.filter((r: Report) => r.sectionId === section.id);
                   if (searchTerm && (secReps?.length || 0) === 0) return null;
-                  return <AccordionItem key={section.id} section={section} reports={secReps} onEdit={handleEditReport} onNewReport={(s) => { setDefaultSectionId(s.id); setCurrentTab(s.type === 'diagnostico' ? 'form_diagnostico' : 'form_preventivo'); }} />;
+                  return <AccordionItem key={section.id} section={section} reports={secReps} onEdit={canUseReportWorkflow ? handleEditReport : undefined} onNewReport={canUseReportWorkflow ? (s) => { setDefaultSectionId(s.id); setCurrentTab(s.type === 'diagnostico' ? 'form_diagnostico' : 'form_preventivo'); } : undefined} />;
                 })}
                 {searchTerm && (filteredReports?.length || 0) === 0 && (
                   <div
@@ -129,11 +234,14 @@ export default function AdminDashboard({ sections, reports, messages, setMessage
           </div>
         )}
 
-        {currentTab === 'secciones' && <SectionManager sections={sections} />}
-        {currentTab === 'usuarios' && <UserManager users={users} />}
-        {currentTab === 'chat' && <ChatSystem messages={messages} setMessages={setMessages} currentUser={currentUser} allUsers={users} />}
+        {currentTab === 'secciones' && canUseTab('secciones') && <SectionManager sections={sections} />}
+        {currentTab === 'notificaciones' && canUseTab('notificaciones') && <NotificationsPanel notifications={notifications} />}
+        {currentTab === 'metricas' && canUseTab('metricas') && <MetricsPanel reports={reports} />}
+        {currentTab === 'respaldos' && canUseTab('respaldos') && <BackupPanel />}
+        {currentTab === 'usuarios' && canUseTab('usuarios') && <UserManager users={users} />}
+        {currentTab === 'chat' && canUseTab('chat') && <ChatSystem messages={messages} setMessages={setMessages} currentUser={currentUser} allUsers={users} />}
 
-        {currentTab === 'hacer_reporte' && (
+        {currentTab === 'hacer_reporte' && canUseReportWorkflow && (
           <div className="flex flex-col items-center py-12 animate-in fade-in">
             <h2 className="text-3xl font-bold mb-2" style={{ color: 'var(--text-primary)' }}>Formato de Servicio (Admin)</h2>
             <p className="text-sm mb-10" style={{ color: 'var(--text-secondary)' }}>Selecciona el tipo de reporte para comenzar a llenarlo.</p>
@@ -155,7 +263,7 @@ export default function AdminDashboard({ sections, reports, messages, setMessage
                   </div>
                   <span className="text-2xl font-bold mb-3" style={{ color: 'var(--text-primary)' }}>{label}</span>
                   <span className="text-xs font-semibold px-4 py-1.5 rounded-full" style={{ backgroundColor: lightVar, color: accentVar, border: `1px solid ${borderVar}` }}>
-                    Automático a Excel
+                    Generación PDF
                   </span>
                 </button>
               ))}
@@ -163,11 +271,11 @@ export default function AdminDashboard({ sections, reports, messages, setMessage
           </div>
         )}
 
-        {currentTab === 'form' && (
+        {currentTab === 'form' && canUseReportWorkflow && (
           <AdminJobWizard type="Preventivo" sections={sections} currentUser={currentUser} onCancel={() => setCurrentTab('hacer_reporte')} />
         )}
 
-        {(currentTab === 'form_preventivo' || currentTab === 'form_diagnostico') && (
+        {(currentTab === 'form_preventivo' || currentTab === 'form_diagnostico') && canUseReportWorkflow && (
           <TorreWizard
             type={currentTab === 'form_preventivo' ? 'preventivo' : 'diagnostico'}
             sections={sections}
@@ -177,7 +285,7 @@ export default function AdminDashboard({ sections, reports, messages, setMessage
           />
         )}
 
-        {currentTab === 'edit_report' && editingReport && (
+        {currentTab === 'edit_report' && editingReport && canUseReportWorkflow && (
           <TorreWizard
             type={editingReport.type === 'diagnostico' ? 'diagnostico' : 'preventivo'}
             sections={sections}
@@ -217,6 +325,24 @@ function TabButton({ active, onClick, icon, label }: { active: boolean; onClick:
 
 function AccordionItem({ section, reports, onEdit, onNewReport }: { section: Section; reports: Report[]; onEdit?: (r: Report) => void; onNewReport?: (s: Section) => void }) {
   const [isOpen, setIsOpen] = useState<boolean>(false);
+  const [historyReport, setHistoryReport] = useState<Report | null>(null);
+  const [historyItems, setHistoryItems] = useState<ReportHistoryItem[]>([]);
+  const [isLoadingHistory, setIsLoadingHistory] = useState(false);
+
+  const openHistory = async (report: Report) => {
+    setHistoryReport(report);
+    setIsLoadingHistory(true);
+    try {
+      const snap = await getDocs(query(collection(db, 'reportHistory'), where('reportId', '==', report.id)));
+      const items = snap.docs
+        .map(d => ({ id: d.id, ...d.data() } as ReportHistoryItem))
+        .sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
+      setHistoryItems(items);
+    } catch {
+      alert('No se pudo cargar el historial del reporte.');
+    }
+    setIsLoadingHistory(false);
+  };
 
   return (
     <div
@@ -314,6 +440,13 @@ function AccordionItem({ section, reports, onEdit, onNewReport }: { section: Sec
                   </div>
 
                   <div className="flex flex-col sm:flex-row gap-2 w-full md:w-auto">
+                    <button
+                      onClick={() => openHistory(report)}
+                      className="flex-1 md:flex-none flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all duration-200"
+                      style={{ backgroundColor: 'var(--bg-secondary)', color: 'var(--text-secondary)', border: '1px solid var(--border)' }}
+                    >
+                      <History className="w-4 h-4" /> Historial
+                    </button>
                     {onEdit && (
                       <button
                         onClick={() => onEdit(report)}
@@ -325,23 +458,6 @@ function AccordionItem({ section, reports, onEdit, onNewReport }: { section: Sec
                         <Pencil className="w-4 h-4" /> Editar
                       </button>
                     )}
-                    <button
-                      onClick={() => {
-                        if (report.type === 'diagnostico') {
-                          generarDiagnosticoTorre(report);
-                        } else if (report.type === 'preventivo') {
-                          generarMhosA0143(report);
-                        } else {
-                          generarExcel(report);
-                        }
-                      }}
-                      className="flex-1 md:flex-none flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all duration-200"
-                      style={{ backgroundColor: 'var(--success-light)', color: 'var(--success)', border: '1px solid var(--success)' }}
-                      onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.backgroundColor = 'var(--success)'; (e.currentTarget as HTMLButtonElement).style.color = '#fff'; }}
-                      onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.backgroundColor = 'var(--success-light)'; (e.currentTarget as HTMLButtonElement).style.color = 'var(--success)'; }}
-                    >
-                      <Download className="w-4 h-4" /> Excel
-                    </button>
                     <button
                       onClick={() => {
                         if (report.type === 'diagnostico') {
@@ -362,6 +478,45 @@ function AccordionItem({ section, reports, onEdit, onNewReport }: { section: Sec
               ))}
             </div>
           )}
+        </div>
+      )}
+
+      {historyReport && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ backgroundColor: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(8px)' }}>
+          <div className="w-full max-w-3xl max-h-[90vh] overflow-y-auto rounded-3xl" style={{ backgroundColor: 'var(--bg-card)', border: '1px solid var(--border)', boxShadow: 'var(--shadow-lg)' }}>
+            <div className="flex justify-between items-center p-6" style={{ borderBottom: '1px solid var(--border)' }}>
+              <div>
+                <h3 className="text-xl font-bold" style={{ color: 'var(--text-primary)' }}>Historial de Cambios</h3>
+                <p className="text-sm mt-0.5" style={{ color: 'var(--text-secondary)' }}>{historyReport.serial}</p>
+              </div>
+              <button onClick={() => setHistoryReport(null)} className="p-2 rounded-xl" style={{ backgroundColor: 'var(--bg-tertiary)', color: 'var(--text-muted)', border: '1px solid var(--border)' }}>
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="p-6 space-y-4">
+              {isLoadingHistory ? (
+                <p className="text-sm" style={{ color: 'var(--text-muted)' }}>Cargando historial...</p>
+              ) : historyItems.length === 0 ? (
+                <p className="text-sm text-center py-8" style={{ color: 'var(--text-muted)' }}>Aun no hay historial para este reporte.</p>
+              ) : historyItems.map(item => (
+                <div key={item.id} className="rounded-2xl p-4" style={{ backgroundColor: 'var(--bg-secondary)', border: '1px solid var(--border)' }}>
+                  <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1 mb-3">
+                    <p className="font-bold" style={{ color: 'var(--text-primary)' }}>{item.action === 'created' ? 'Reporte creado' : 'Reporte editado'}</p>
+                    <p className="text-xs" style={{ color: 'var(--text-muted)' }}>{item.createdAt ? new Date(item.createdAt).toLocaleString() : ''}</p>
+                  </div>
+                  <p className="text-sm mb-3" style={{ color: 'var(--text-secondary)' }}>Por {item.actorName}</p>
+                  <div className="space-y-2">
+                    {(item.changes || []).map((change, idx) => (
+                      <div key={idx} className="grid grid-cols-1 md:grid-cols-[160px_1fr] gap-2 text-sm rounded-xl p-3" style={{ backgroundColor: 'var(--bg-card)', border: '1px solid var(--border)' }}>
+                        <span className="font-semibold" style={{ color: 'var(--text-primary)' }}>{change.label}</span>
+                        <span style={{ color: 'var(--text-secondary)' }}><span style={{ color: 'var(--text-muted)' }}>{change.before}</span> {'->'} <span>{change.after}</span></span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
         </div>
       )}
     </div>
@@ -631,32 +786,433 @@ function SectionManager({ sections }: { sections: Section[] }) {
 
 // ─── User Manager ─────────────────────────────────────────────────────────────
 
+type UserProfileForm = {
+  name: string;
+  username: string;
+  password: string;
+  role: User['role'];
+  nickname: string;
+  phone: string;
+  photoUrl: string;
+  profileColor: string;
+  canAccessReports: boolean;
+  canManageSections: boolean;
+};
+
+type UserProfileEditForm = Omit<UserProfileForm, 'password'>;
+
+const DEFAULT_PROFILE_COLOR = '#2563eb';
+const PROFILE_COLORS = ['#2563eb', '#16a34a', '#dc2626', '#9333ea', '#ea580c', '#0891b2', '#111827', '#64748b'];
+
+const emptyCreateUserForm = (): UserProfileForm => ({
+  name: '',
+  username: '',
+  password: '',
+  role: 'job',
+  nickname: '',
+  phone: '',
+  photoUrl: '',
+  profileColor: DEFAULT_PROFILE_COLOR,
+  canAccessReports: false,
+  canManageSections: false,
+});
+
+const emptyEditUserForm = (): UserProfileEditForm => ({
+  name: '',
+  username: '',
+  role: 'job',
+  nickname: '',
+  phone: '',
+  photoUrl: '',
+  profileColor: DEFAULT_PROFILE_COLOR,
+  canAccessReports: false,
+  canManageSections: false,
+});
+
+
+function NotificationsPanel({ notifications }: { notifications: AppNotification[] }) {
+  const markAsRead = async (notification: AppNotification) => {
+    if (notification.isRead) return;
+    try {
+      await updateDoc(doc(db, 'notifications', notification.id), { isRead: true, readAt: new Date().toISOString() });
+    } catch {
+      alert('No se pudo marcar la notificacion.');
+    }
+  };
+
+  return (
+    <div className="max-w-4xl animate-in fade-in">
+      <div className="pb-5 mb-6" style={{ borderBottom: '1px solid var(--border)' }}>
+        <h2 className="text-2xl font-bold tracking-tight" style={{ color: 'var(--text-primary)' }}>Notificaciones</h2>
+        <p className="text-sm mt-1" style={{ color: 'var(--text-secondary)' }}>Avisos internos cuando los tecnicos crean reportes.</p>
+      </div>
+      <div className="space-y-3">
+        {notifications.length === 0 ? (
+          <p className="text-sm text-center py-12" style={{ color: 'var(--text-muted)' }}>No hay notificaciones.</p>
+        ) : notifications.map(notification => (
+          <button key={notification.id} onClick={() => markAsRead(notification)} className="w-full text-left rounded-2xl p-4 transition-all duration-200" style={{ backgroundColor: notification.isRead ? 'var(--bg-secondary)' : 'var(--accent-light)', border: notification.isRead ? '1px solid var(--border)' : '1px solid var(--accent-border)' }}>
+            <div className="flex items-start gap-3">
+              <div className="p-2 rounded-xl shrink-0" style={{ backgroundColor: notification.isRead ? 'var(--bg-tertiary)' : 'var(--accent)', color: notification.isRead ? 'var(--text-muted)' : '#fff' }}>
+                <Bell className="w-4 h-4" />
+              </div>
+              <div className="min-w-0 flex-1">
+                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1">
+                  <p className="font-bold" style={{ color: 'var(--text-primary)' }}>{notification.title}</p>
+                  <span className="text-xs" style={{ color: 'var(--text-muted)' }}>{notification.createdAt ? new Date(notification.createdAt).toLocaleString() : ''}</span>
+                </div>
+                <p className="text-sm mt-1" style={{ color: 'var(--text-secondary)' }}>{notification.message}</p>
+                {!notification.isRead && <p className="text-xs font-semibold mt-2" style={{ color: 'var(--accent)' }}>Click para marcar como leida</p>}
+              </div>
+            </div>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+type MetricRow = { label: string; count: number };
+
+function MetricList({ title, rows }: { title: string; rows: MetricRow[] }) {
+  const max = Math.max(...rows.map(row => row.count), 1);
+
+  return (
+    <div className="rounded-2xl p-5" style={{ backgroundColor: 'var(--bg-secondary)', border: '1px solid var(--border)' }}>
+      <h3 className="font-bold mb-4" style={{ color: 'var(--text-primary)' }}>{title}</h3>
+      <div className="space-y-3">
+        {rows.slice(0, 8).map(row => {
+          const width = Math.max(8, Math.round((row.count / max) * 100));
+          return (
+            <div key={row.label}>
+              <div className="flex justify-between gap-3 text-sm mb-1">
+                <span className="truncate font-medium" style={{ color: 'var(--text-secondary)' }}>{row.label}</span>
+                <span className="font-bold" style={{ color: 'var(--text-primary)' }}>{row.count}</span>
+              </div>
+              <div className="h-2 rounded-full overflow-hidden" style={{ backgroundColor: 'var(--bg-tertiary)' }}>
+                <div className="h-full rounded-full" style={{ width: width + '%', backgroundColor: 'var(--accent)' }} />
+              </div>
+            </div>
+          );
+        })}
+        {rows.length === 0 && <p className="text-sm" style={{ color: 'var(--text-muted)' }}>Sin datos.</p>}
+      </div>
+    </div>
+  );
+}
+
+function BackupPanel() {
+  const [isCreating, setIsCreating] = useState(false);
+  const [lastBackup, setLastBackup] = useState<string>('');
+  const collectionsToBackup = ['users', 'sections', 'reports', 'reportHistory', 'notifications', 'messages'];
+
+  const readCollection = async (name: string) => {
+    const snapshot = await getDocs(collection(db, name));
+    return snapshot.docs.map(docSnap => ({ id: docSnap.id, ...docSnap.data() }));
+  };
+
+  const handleCreateBackup = async () => {
+    setIsCreating(true);
+    try {
+      const JSZip = (await import('jszip')).default;
+      const zip = new JSZip();
+      const createdAt = new Date().toISOString();
+      const backupData: Record<string, unknown> = {
+        metadata: {
+          app: 'MHOS',
+          createdAt,
+          collections: collectionsToBackup,
+        },
+      };
+
+      const dataFolder = zip.folder('data');
+      for (const collectionName of collectionsToBackup) {
+        const data = await readCollection(collectionName);
+        backupData[collectionName] = data;
+        dataFolder?.file(collectionName + '.json', JSON.stringify(data, null, 2));
+      }
+
+      zip.file('respaldo-completo.json', JSON.stringify(backupData, null, 2));
+      zip.file('LEEME.txt', [
+        'Respaldo MHOS',
+        'Fecha: ' + createdAt,
+        '',
+        'Este archivo contiene datos exportados desde Firebase en formato JSON.',
+        'Los PDFs e imagenes guardados solo como archivos externos deben respaldarse desde la VPS.',
+      ].join('\n'));
+
+      const blob = await zip.generateAsync({ type: 'blob' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      const stamp = createdAt.slice(0, 19).replace(/[:T]/g, '-');
+      link.href = url;
+      link.download = 'respaldo-mhos-' + stamp + '.zip';
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+      setLastBackup(createdAt);
+    } catch (error) {
+      console.error('Error creando respaldo:', error);
+      alert('No se pudo crear el respaldo. Revisa permisos o conexion.');
+    } finally {
+      setIsCreating(false);
+    }
+  };
+
+  return (
+    <div className="animate-in fade-in space-y-6">
+      <div className="pb-5" style={{ borderBottom: '1px solid var(--border)' }}>
+        <h2 className="text-2xl font-bold tracking-tight" style={{ color: 'var(--text-primary)' }}>Respaldos</h2>
+        <p className="text-sm mt-1" style={{ color: 'var(--text-secondary)' }}>Descarga una copia local de los datos principales del sistema.</p>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-[1.2fr_0.8fr] gap-5">
+        <div className="rounded-2xl p-6" style={{ backgroundColor: 'var(--bg-secondary)', border: '1px solid var(--border)' }}>
+          <div className="flex items-start gap-4">
+            <div className="p-3 rounded-2xl" style={{ backgroundColor: 'var(--accent-light)', color: 'var(--accent)' }}>
+              <Database className="w-7 h-7" />
+            </div>
+            <div className="min-w-0 flex-1">
+              <h3 className="text-lg font-bold" style={{ color: 'var(--text-primary)' }}>Respaldo manual</h3>
+              <p className="text-sm mt-1 leading-relaxed" style={{ color: 'var(--text-secondary)' }}>
+                Genera un ZIP con usuarios, secciones, reportes, historial, notificaciones y mensajes.
+              </p>
+              <button
+                onClick={handleCreateBackup}
+                disabled={isCreating}
+                className="mt-5 inline-flex items-center gap-2 px-5 py-3 rounded-xl text-sm font-bold transition-all duration-200"
+                style={{ backgroundColor: 'var(--accent)', color: '#fff', opacity: isCreating ? 0.7 : 1 }}
+              >
+                {isCreating ? (
+                  <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                ) : (
+                  <Download className="w-4 h-4" />
+                )}
+                {isCreating ? 'Creando respaldo...' : 'Crear y descargar ZIP'}
+              </button>
+              {lastBackup && (
+                <p className="text-xs mt-3" style={{ color: 'var(--text-muted)' }}>Ultimo respaldo creado: {new Date(lastBackup).toLocaleString('es-MX')}</p>
+              )}
+            </div>
+          </div>
+        </div>
+
+        <div className="rounded-2xl p-6" style={{ backgroundColor: 'var(--warning-light)', border: '1px solid var(--warning)' }}>
+          <Archive className="w-7 h-7 mb-4" style={{ color: 'var(--warning)' }} />
+          <h3 className="font-bold mb-2" style={{ color: 'var(--text-primary)' }}>Importante</h3>
+          <p className="text-sm leading-relaxed" style={{ color: 'var(--text-secondary)' }}>
+            Este respaldo descarga datos de Firebase. Cuando despleguemos en VPS, agregaremos el respaldo diario automatico de PDFs e imagenes del servidor.
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function MetricsPanel({ reports }: { reports: Report[] }) {
+  const countBy = (items: Report[], getter: (report: Report) => string) => {
+    const counts = new Map<string, number>();
+    items.forEach(report => {
+      const key = getter(report) || 'Sin dato';
+      counts.set(key, (counts.get(key) || 0) + 1);
+    });
+    return Array.from(counts.entries()).map(([label, count]) => ({ label, count })).sort((a, b) => b.count - a.count);
+  };
+
+  const monthLabel = (report: Report) => {
+    const raw = report.date || report.createdAt || '';
+    if (!raw) return 'Sin fecha';
+    const date = new Date(raw);
+    if (Number.isNaN(date.getTime())) return raw.slice(0, 7) || 'Sin fecha';
+    return date.toLocaleDateString('es-MX', { year: 'numeric', month: 'long' });
+  };
+
+  const byTech = countBy(reports, report => report.jobName || 'Sin tecnico');
+  const byClient = countBy(reports, report => report.client || 'Sin cliente');
+  const byMonth = countBy(reports, monthLabel);
+  const preventivos = reports.filter(r => String(r.type).toLowerCase() === 'preventivo').length;
+  const diagnosticos = reports.filter(r => String(r.type).toLowerCase() === 'diagnostico').length;
+
+  return (
+    <div className="animate-in fade-in space-y-6">
+      <div className="pb-5" style={{ borderBottom: '1px solid var(--border)' }}>
+        <h2 className="text-2xl font-bold tracking-tight" style={{ color: 'var(--text-primary)' }}>Panel de Metricas</h2>
+        <p className="text-sm mt-1" style={{ color: 'var(--text-secondary)' }}>Resumen de reportes por tecnico, cliente y mes.</p>
+      </div>
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        {[
+          ['Total reportes', reports.length],
+          ['Preventivos', preventivos],
+          ['Diagnosticos', diagnosticos],
+        ].map(([label, value]) => (
+          <div key={label} className="rounded-2xl p-5" style={{ backgroundColor: 'var(--accent-light)', border: '1px solid var(--accent-border)' }}>
+            <p className="text-xs font-bold uppercase tracking-widest" style={{ color: 'var(--accent)' }}>{label}</p>
+            <p className="text-3xl font-bold mt-2" style={{ color: 'var(--text-primary)' }}>{value}</p>
+          </div>
+        ))}
+      </div>
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
+        <MetricList title="Por tecnico" rows={byTech} />
+        <MetricList title="Por cliente" rows={byClient} />
+        <MetricList title="Por mes" rows={byMonth} />
+      </div>
+    </div>
+  );
+}
+
 function UserManager({ users }: { users: User[] }) {
-  const [formData, setFormData] = useState({ name: '', username: '', password: '', role: 'job' });
+  const [formData, setFormData] = useState<UserProfileForm>(emptyCreateUserForm);
   const [showPassword, setShowPassword] = useState<boolean>(false);
   const [isSaving, setIsSaving] = useState<boolean>(false);
-  const [editingUser, setEditingUser] = useState<(User & { phone?: string }) | null>(null);
-  const [editForm, setEditForm] = useState({ name: '', username: '', phone: '', role: 'job' });
+  const [editingUser, setEditingUser] = useState<User | null>(null);
+  const [editForm, setEditForm] = useState<UserProfileEditForm>(emptyEditUserForm);
   const [isUpdating, setIsUpdating] = useState<boolean>(false);
+
+  const resizeProfileImage = (file: File): Promise<string> => new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error('No se pudo leer la imagen.'));
+    reader.onload = (event) => {
+      const img = new Image();
+      img.onerror = () => reject(new Error('No se pudo procesar la imagen.'));
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        const size = 256;
+        canvas.width = size;
+        canvas.height = size;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) {
+          reject(new Error('No se pudo preparar la imagen.'));
+          return;
+        }
+
+        const scale = Math.max(size / img.width, size / img.height);
+        const width = img.width * scale;
+        const height = img.height * scale;
+        const x = (size - width) / 2;
+        const y = (size - height) / 2;
+
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, size, size);
+        ctx.drawImage(img, x, y, width, height);
+        resolve(canvas.toDataURL('image/jpeg', 0.72));
+      };
+      img.src = String(event.target?.result || '');
+    };
+    reader.readAsDataURL(file);
+  });
+
+  const handleProfileImageUpload = async (e: React.ChangeEvent<HTMLInputElement>, mode: 'create' | 'edit') => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    if (!file.type.startsWith('image/')) {
+      alert('Selecciona un archivo de imagen.');
+      return;
+    }
+
+    try {
+      const photoUrl = await resizeProfileImage(file);
+      if (mode === 'create') {
+        setFormData(prev => ({ ...prev, photoUrl }));
+      } else {
+        setEditForm(prev => ({ ...prev, photoUrl }));
+      }
+    } catch (_err) {
+      alert('No se pudo cargar la imagen de perfil.');
+    }
+  };
+
+  const getInitials = (name: string) => (
+    name || 'U'
+  ).split(' ').filter(Boolean).map(part => part[0]).slice(0, 2).join('').toUpperCase();
+
+  const avatarPreview = (name: string, photoUrl: string, color: string, size: 'sm' | 'lg' = 'lg') => {
+    const sizeCls = size === 'sm' ? 'w-10 h-10 rounded-xl text-xs' : 'w-20 h-20 rounded-2xl text-lg';
+    return (
+      <div
+        className={sizeCls + " flex items-center justify-center font-bold text-white shrink-0 overflow-hidden"}
+        style={{ backgroundColor: color || DEFAULT_PROFILE_COLOR, border: '1px solid var(--border)' }}
+      >
+        {photoUrl ? (
+          <img src={photoUrl} alt={name || 'Foto de perfil'} className="w-full h-full object-cover" />
+        ) : (
+          getInitials(name)
+        )}
+      </div>
+    );
+  };
+
+  const colorPicker = (value: string, onChange: (color: string) => void) => (
+    <div className="flex flex-wrap items-center gap-2">
+      {PROFILE_COLORS.map(color => (
+        <button
+          key={color}
+          type="button"
+          aria-label={'Color ' + color}
+          title={'Color ' + color}
+          onClick={() => onChange(color)}
+          className="w-8 h-8 rounded-full transition-transform duration-200"
+          style={{
+            backgroundColor: color,
+            border: value === color ? '3px solid var(--text-primary)' : '2px solid var(--border)',
+            transform: value === color ? 'scale(1.08)' : 'scale(1)',
+          }}
+        />
+      ))}
+      <input
+        type="color"
+        value={value || DEFAULT_PROFILE_COLOR}
+        onChange={e => onChange(e.target.value)}
+        className="w-9 h-9 cursor-pointer rounded-full overflow-hidden"
+        title="Color personalizado"
+      />
+    </div>
+  );
+
+  const permissionOption = (checked: boolean, label: string, description: string, onChange: (checked: boolean) => void) => (
+    <label className="flex items-start gap-3 p-3 rounded-xl cursor-pointer" style={{ backgroundColor: 'var(--bg-card)', border: '1px solid var(--border)' }}>
+      <input type="checkbox" checked={checked} onChange={e => onChange(e.target.checked)} className="mt-1 w-4 h-4 accent-blue-600" />
+      <span className="min-w-0">
+        <span className="block text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>{label}</span>
+        <span className="block text-xs leading-snug mt-0.5" style={{ color: 'var(--text-muted)' }}>{description}</span>
+      </span>
+    </label>
+  );
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsSaving(true);
     try {
-      await addDoc(collection(db, 'users'), { ...formData, createdAt: new Date().toISOString() });
-      setFormData({ name: '', username: '', password: '', role: 'job' });
-      alert("Ficha de usuario guardada en la base de datos.");
-    } catch (_err) { alert("Error al guardar el usuario."); }
+      await addDoc(collection(db, 'users'), {
+        ...formData,
+        name: formData.name.trim(),
+        username: formData.username.trim(),
+        nickname: formData.nickname.trim(),
+        phone: formData.phone.trim(),
+        role: formData.role,
+        profileColor: formData.profileColor || DEFAULT_PROFILE_COLOR,
+        canAccessReports: formData.canAccessReports,
+        canManageSections: formData.canManageSections,
+        createdAt: new Date().toISOString(),
+      });
+      setFormData(emptyCreateUserForm());
+      alert('Ficha de usuario guardada en la base de datos.');
+    } catch (_err) { alert('Error al guardar el usuario.'); }
     setIsSaving(false);
   };
 
   const openEditUser = (u: User) => {
-    setEditingUser(u as User & { phone?: string });
+    setEditingUser(u);
     setEditForm({
       name: u.name || '',
       username: u.username || '',
-      phone: (u as User & { phone?: string }).phone || '',
+      phone: u.phone || '',
       role: u.role || 'job',
+      nickname: u.nickname || '',
+      photoUrl: u.photoUrl || '',
+      profileColor: u.profileColor || DEFAULT_PROFILE_COLOR,
+      canAccessReports: u.canAccessReports === true,
+      canManageSections: u.canManageSections === true,
     });
   };
 
@@ -666,13 +1222,18 @@ function UserManager({ users }: { users: User[] }) {
     setIsUpdating(true);
     try {
       await updateDoc(doc(db, 'users', editingUser.id), {
-        name: editForm.name,
-        username: editForm.username,
-        phone: editForm.phone,
+        name: editForm.name.trim(),
+        username: editForm.username.trim(),
+        phone: editForm.phone.trim(),
         role: editForm.role,
+        nickname: editForm.nickname.trim(),
+        photoUrl: editForm.photoUrl,
+        profileColor: editForm.profileColor || DEFAULT_PROFILE_COLOR,
+        canAccessReports: editForm.canAccessReports,
+        canManageSections: editForm.canManageSections,
       });
       setEditingUser(null);
-    } catch (_err) { alert("Error al actualizar el usuario."); }
+    } catch (_err) { alert('Error al actualizar el usuario.'); }
     setIsUpdating(false);
   };
 
@@ -683,7 +1244,7 @@ function UserManager({ users }: { users: User[] }) {
   const lbl = "block text-xs font-semibold uppercase tracking-wider mb-2";
 
   return (
-    <div className="max-w-5xl animate-in fade-in">
+    <div className="max-w-6xl animate-in fade-in">
       <div className="pb-5 mb-6" style={{ borderBottom: '1px solid var(--border)' }}>
         <h2 className="text-2xl font-bold tracking-tight" style={{ color: 'var(--text-primary)' }}>Cuentas y Accesos</h2>
         <p className="text-sm mt-1" style={{ color: 'var(--text-secondary)' }}>Registra los datos de tu equipo. (Recuerda darlos de alta en Firebase Authentication).</p>
@@ -691,27 +1252,64 @@ function UserManager({ users }: { users: User[] }) {
 
       <form
         onSubmit={handleCreate}
-        className="grid grid-cols-1 md:grid-cols-3 gap-5 mb-12 p-6 md:p-8 rounded-2xl"
+        className="grid grid-cols-1 md:grid-cols-4 gap-5 mb-12 p-6 md:p-8 rounded-2xl"
         style={{ backgroundColor: 'var(--bg-secondary)', border: '1px solid var(--border)' }}
       >
-        <div className="md:col-span-3 mb-2">
+        <div className="md:col-span-4 mb-2">
           <h3 className="font-bold text-lg flex items-center gap-2" style={{ color: 'var(--text-primary)' }}>
             <Plus className="w-5 h-5" style={{ color: 'var(--accent)' }} /> Registrar Nuevo Empleado
           </h3>
         </div>
 
-        <div>
-          <label className={lbl} style={{ color: 'var(--text-muted)' }}>Nombre Completo</label>
-          <input type="text" required value={formData.name} onChange={e => setFormData({ ...formData, name: e.target.value })} className={inputCls} style={inputStyle} placeholder="Ej. Juan Pérez" onFocus={inputFocus} onBlur={inputBlur} />
+        <div className="md:row-span-2">
+          <label className={lbl} style={{ color: 'var(--text-muted)' }}>Foto de Perfil</label>
+          <div className="flex md:flex-col items-center md:items-start gap-4">
+            {avatarPreview(formData.name, formData.photoUrl, formData.profileColor)}
+            <div className="flex flex-col gap-2">
+              <label
+                className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold cursor-pointer transition-all duration-200"
+                style={{ backgroundColor: 'var(--bg-card)', color: 'var(--text-secondary)', border: '1px solid var(--border)' }}
+              >
+                <Camera className="w-4 h-4" />
+                Cargar foto
+                <input type="file" accept="image/*" className="sr-only" onChange={e => handleProfileImageUpload(e, 'create')} />
+              </label>
+              {formData.photoUrl && (
+                <button
+                  type="button"
+                  onClick={() => setFormData(prev => ({ ...prev, photoUrl: '' }))}
+                  className="text-xs font-semibold text-left"
+                  style={{ color: 'var(--danger)' }}
+                >
+                  Quitar foto
+                </button>
+              )}
+            </div>
+          </div>
         </div>
 
         <div>
-          <label className={lbl} style={{ color: 'var(--text-muted)' }}>Correo Electrónico</label>
+          <label className={lbl} style={{ color: 'var(--text-muted)' }}>Nombre Completo</label>
+          <input type="text" required value={formData.name} onChange={e => setFormData({ ...formData, name: e.target.value })} className={inputCls} style={inputStyle} placeholder="Ej. Juan Perez" onFocus={inputFocus} onBlur={inputBlur} />
+        </div>
+
+        <div>
+          <label className={lbl} style={{ color: 'var(--text-muted)' }}>Apodo Opcional</label>
+          <input type="text" value={formData.nickname} onChange={e => setFormData({ ...formData, nickname: e.target.value })} className={inputCls} style={inputStyle} placeholder="Ej. Juanito" onFocus={inputFocus} onBlur={inputBlur} />
+        </div>
+
+        <div>
+          <label className={lbl} style={{ color: 'var(--text-muted)' }}>Correo Electronico</label>
           <input type="email" required value={formData.username} onChange={e => setFormData({ ...formData, username: e.target.value })} className={inputCls} style={inputStyle} placeholder="juan@empresa.com" onFocus={inputFocus} onBlur={inputBlur} />
         </div>
 
         <div>
-          <label className={lbl} style={{ color: 'var(--text-muted)' }}>Contraseña Asignada</label>
+          <label className={lbl} style={{ color: 'var(--text-muted)' }}>Telefono</label>
+          <input type="tel" value={formData.phone} onChange={e => setFormData({ ...formData, phone: e.target.value })} className={inputCls} style={inputStyle} placeholder="+52 555 000 0000" onFocus={inputFocus} onBlur={inputBlur} />
+        </div>
+
+        <div>
+          <label className={lbl} style={{ color: 'var(--text-muted)' }}>Contrasena Asignada</label>
           <div className="relative">
             <input
               type={showPassword ? "text" : "password"}
@@ -720,7 +1318,7 @@ function UserManager({ users }: { users: User[] }) {
               onChange={e => setFormData({ ...formData, password: e.target.value })}
               className={inputCls + " pr-12"}
               style={inputStyle}
-              placeholder="••••••••"
+              placeholder="********"
               onFocus={inputFocus}
               onBlur={inputBlur}
             />
@@ -730,19 +1328,32 @@ function UserManager({ users }: { users: User[] }) {
           </div>
         </div>
 
-        <div className="md:col-span-2">
-          <label className={lbl} style={{ color: 'var(--text-muted)' }}>Nivel de Permisos</label>
+        <div>
+          <label className={lbl} style={{ color: 'var(--text-muted)' }}>Rol</label>
           <select
             value={formData.role}
-            onChange={e => setFormData({ ...formData, role: e.target.value })}
+            onChange={e => setFormData({ ...formData, role: e.target.value as User['role'] })}
             className={inputCls + " cursor-pointer"}
             style={inputStyle}
             onFocus={inputFocus}
             onBlur={inputBlur}
           >
-            <option value="job">Técnico de Campo (Job) — Solo reportes</option>
-            <option value="admin">Administrador — Acceso total</option>
+            <option value="job">Tecnico de Campo (Job) - Solo reportes</option>
+            <option value="admin">Administrador - Acceso total</option>
           </select>
+        </div>
+
+        <div>
+          <label className={lbl} style={{ color: 'var(--text-muted)' }}>Color de Perfil</label>
+          {colorPicker(formData.profileColor, color => setFormData({ ...formData, profileColor: color }))}
+        </div>
+
+        <div className="md:col-span-2">
+          <label className={lbl} style={{ color: 'var(--text-muted)' }}>Permisos del Trabajador</label>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            {permissionOption(formData.canAccessReports, 'Buzon de reportes', 'Puede ver y descargar reportes generados.', checked => setFormData({ ...formData, canAccessReports: checked }))}
+            {permissionOption(formData.canManageSections, 'Gestion de secciones', 'Puede crear, editar y eliminar carpetas.', checked => setFormData({ ...formData, canManageSections: checked }))}
+          </div>
         </div>
 
         <div className="flex items-end">
@@ -765,9 +1376,9 @@ function UserManager({ users }: { users: User[] }) {
           <table className="w-full text-left text-sm whitespace-nowrap">
             <thead style={{ backgroundColor: 'var(--bg-secondary)', borderBottom: '1px solid var(--border)' }}>
               <tr>
-                <th className="px-6 py-4 text-xs font-bold uppercase tracking-widest" style={{ color: 'var(--text-muted)' }}>Nombre Completo</th>
+                <th className="px-6 py-4 text-xs font-bold uppercase tracking-widest" style={{ color: 'var(--text-muted)' }}>Perfil</th>
                 <th className="px-6 py-4 text-xs font-bold uppercase tracking-widest" style={{ color: 'var(--text-muted)' }}>Correo</th>
-                <th className="px-6 py-4 text-xs font-bold uppercase tracking-widest" style={{ color: 'var(--text-muted)' }}>Contraseña</th>
+                <th className="px-6 py-4 text-xs font-bold uppercase tracking-widest" style={{ color: 'var(--text-muted)' }}>Contrasena</th>
                 <th className="px-6 py-4 text-xs font-bold uppercase tracking-widest" style={{ color: 'var(--text-muted)' }}>Rol</th>
                 <th className="px-6 py-4 text-xs font-bold uppercase tracking-widest" style={{ color: 'var(--text-muted)' }}>Acciones</th>
               </tr>
@@ -782,17 +1393,17 @@ function UserManager({ users }: { users: User[] }) {
                 >
                   <td className="px-6 py-4">
                     <div className="flex items-center gap-3">
-                      <div
-                        className="w-9 h-9 rounded-xl flex items-center justify-center font-bold text-xs shrink-0"
-                        style={{ backgroundColor: 'var(--accent-light)', color: 'var(--accent)', border: '1px solid var(--accent-border)' }}
-                      >
-                        {(u.name || 'U').charAt(0).toUpperCase()}
+                      {avatarPreview(u.name, u.photoUrl || '', u.profileColor || DEFAULT_PROFILE_COLOR, 'sm')}
+                      <div className="min-w-0">
+                        <p className="font-semibold truncate" style={{ color: 'var(--text-primary)' }}>{u.name || 'Sin nombre'}</p>
+                        <p className="text-xs truncate" style={{ color: 'var(--text-muted)' }}>
+                          {u.nickname ? '@' + u.nickname : u.phone || 'Sin apodo'}
+                        </p>
                       </div>
-                      <span className="font-semibold" style={{ color: 'var(--text-primary)' }}>{u.name}</span>
                     </div>
                   </td>
                   <td className="px-6 py-4" style={{ color: 'var(--text-secondary)' }}>{u.username}</td>
-                  <td className="px-6 py-4" style={{ color: 'var(--text-muted)', fontFamily: "'JetBrains Mono', monospace" }}>{u.password || '••••••••'}</td>
+                  <td className="px-6 py-4" style={{ color: 'var(--text-muted)', fontFamily: "'JetBrains Mono', monospace" }}>{u.password || '********'}</td>
                   <td className="px-6 py-4">
                     <span
                       className="px-3 py-1 rounded-lg text-[10px] font-bold uppercase tracking-widest"
@@ -802,7 +1413,7 @@ function UserManager({ users }: { users: User[] }) {
                           : { backgroundColor: 'var(--success-light)', color: 'var(--success)', border: '1px solid var(--success)' }
                       }
                     >
-                      {u.role === 'admin' ? 'Admin' : 'Técnico'}
+                      {u.role === 'admin' ? 'Admin' : 'Tecnico'}
                     </span>
                   </td>
                   <td className="px-6 py-4">
@@ -829,10 +1440,9 @@ function UserManager({ users }: { users: User[] }) {
         </div>
       </div>
 
-      {/* Edit user modal */}
       {editingUser && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ backgroundColor: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(8px)' }}>
-          <div className="w-full max-w-md rounded-3xl overflow-hidden" style={{ backgroundColor: 'var(--bg-card)', border: '1px solid var(--border)', boxShadow: 'var(--shadow-lg)' }}>
+          <div className="w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-3xl" style={{ backgroundColor: 'var(--bg-card)', border: '1px solid var(--border)', boxShadow: 'var(--shadow-lg)' }}>
             <div className="flex justify-between items-center p-8" style={{ borderBottom: '1px solid var(--border)' }}>
               <div>
                 <h3 className="text-xl font-bold" style={{ color: 'var(--text-primary)' }}>Editar Usuario</h3>
@@ -846,34 +1456,75 @@ function UserManager({ users }: { users: User[] }) {
                 <X className="w-5 h-5" />
               </button>
             </div>
-            <form onSubmit={handleUpdateUser} className="p-8 space-y-4">
+            <form onSubmit={handleUpdateUser} className="p-8 grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="md:col-span-2">
+                <label className={lbl} style={{ color: 'var(--text-muted)' }}>Foto de Perfil</label>
+                <div className="flex items-center gap-4">
+                  {avatarPreview(editForm.name, editForm.photoUrl, editForm.profileColor)}
+                  <div className="flex flex-col gap-2">
+                    <label
+                      className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold cursor-pointer transition-all duration-200"
+                      style={{ backgroundColor: 'var(--bg-secondary)', color: 'var(--text-secondary)', border: '1px solid var(--border)' }}
+                    >
+                      <Camera className="w-4 h-4" />
+                      Cambiar foto
+                      <input type="file" accept="image/*" className="sr-only" onChange={e => handleProfileImageUpload(e, 'edit')} />
+                    </label>
+                    {editForm.photoUrl && (
+                      <button
+                        type="button"
+                        onClick={() => setEditForm(prev => ({ ...prev, photoUrl: '' }))}
+                        className="text-xs font-semibold text-left"
+                        style={{ color: 'var(--danger)' }}
+                      >
+                        Quitar foto
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </div>
               <div>
                 <label className={lbl} style={{ color: 'var(--text-muted)' }}>Nombre Completo</label>
                 <input type="text" required value={editForm.name} onChange={e => setEditForm({ ...editForm, name: e.target.value })} className={inputCls} style={{ ...inputStyle }} placeholder="Nombre completo" onFocus={inputFocus} onBlur={inputBlur} />
               </div>
               <div>
-                <label className={lbl} style={{ color: 'var(--text-muted)' }}>Correo Electrónico</label>
+                <label className={lbl} style={{ color: 'var(--text-muted)' }}>Apodo Opcional</label>
+                <input type="text" value={editForm.nickname} onChange={e => setEditForm({ ...editForm, nickname: e.target.value })} className={inputCls} style={{ ...inputStyle }} placeholder="Apodo" onFocus={inputFocus} onBlur={inputBlur} />
+              </div>
+              <div>
+                <label className={lbl} style={{ color: 'var(--text-muted)' }}>Correo Electronico</label>
                 <input type="email" required value={editForm.username} onChange={e => setEditForm({ ...editForm, username: e.target.value })} className={inputCls} style={{ ...inputStyle }} placeholder="correo@empresa.com" onFocus={inputFocus} onBlur={inputBlur} />
               </div>
               <div>
-                <label className={lbl} style={{ color: 'var(--text-muted)' }}>Teléfono</label>
+                <label className={lbl} style={{ color: 'var(--text-muted)' }}>Telefono</label>
                 <input type="tel" value={editForm.phone} onChange={e => setEditForm({ ...editForm, phone: e.target.value })} className={inputCls} style={{ ...inputStyle }} placeholder="+52 555 000 0000" onFocus={inputFocus} onBlur={inputBlur} />
               </div>
               <div>
                 <label className={lbl} style={{ color: 'var(--text-muted)' }}>Rol</label>
                 <select
                   value={editForm.role}
-                  onChange={e => setEditForm({ ...editForm, role: e.target.value })}
+                  onChange={e => setEditForm({ ...editForm, role: e.target.value as User['role'] })}
                   className={inputCls + " cursor-pointer"}
                   style={{ ...inputStyle }}
                   onFocus={inputFocus}
                   onBlur={inputBlur}
                 >
-                  <option value="job">Técnico de Campo (Job)</option>
+                  <option value="job">Tecnico de Campo (Job)</option>
                   <option value="admin">Administrador</option>
                 </select>
               </div>
-              <div className="flex gap-3 pt-2">
+              <div>
+                <label className={lbl} style={{ color: 'var(--text-muted)' }}>Color de Perfil</label>
+                {colorPicker(editForm.profileColor, color => setEditForm({ ...editForm, profileColor: color }))}
+              </div>
+              <div className="md:col-span-2">
+                <label className={lbl} style={{ color: 'var(--text-muted)' }}>Permisos del Trabajador</label>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  {permissionOption(editForm.canAccessReports, 'Buzon de reportes', 'Puede ver y descargar reportes generados.', checked => setEditForm({ ...editForm, canAccessReports: checked }))}
+                  {permissionOption(editForm.canManageSections, 'Gestion de secciones', 'Puede crear, editar y eliminar carpetas.', checked => setEditForm({ ...editForm, canManageSections: checked }))}
+                </div>
+              </div>
+              <div className="md:col-span-2 flex gap-3 pt-2">
                 <button
                   type="button"
                   onClick={() => setEditingUser(null)}
@@ -964,6 +1615,42 @@ function buildInitialTorre(init?: (Report & Partial<ReportTorre>), type?: string
   };
 }
 
+const PREVENTIVO_CHECKLIST_1 = [
+  "Revision, ajuste y limpieza de cada componente (condensadora, serpentines, filtros)",
+  "Pintado para demarcacion de areas - NOM-031-STPS-2011",
+  "Revision, ajuste y limpieza a nivel componente, tarjetas, controladoras",
+  "Limpieza de filtros del sistema mecanico y condensadora",
+  "Mantenimiento a motores con cambio de baleros (1 por ano)",
+  "Revision y ajuste de presion de gas refrigerante",
+  "Revision de alimentacion: voltajes, amperajes y fases",
+  "Cambio de filtro de aceite, revision y reparacion de fugas de gas",
+  "Completar carga de gas refrigerante",
+  "Cambio de sensores de baja presion",
+  "Revision y programacion de tarjeta de control",
+  "Revision y programacion electrica de equipos",
+  "Revision y programacion de los equipos",
+  "Medicion de voltajes con respecto a tierra fisica",
+  "Revision y diagnostico de indicadores visuales y audibles",
+  "Revision y programacion de tarjeta de control del PLC",
+  "Eliminacion de fugas de aire, sellado de tapas y tornilleria faltante",
+  "Cambio de filtros absolutos HEPA 99.97% - 0.3 micras",
+];
+
+const PREVENTIVO_CHECKLIST_2 = [
+  "Cambio de capacitor de arranque",
+  "Limpieza de charola de condensados y sustitucion de tuberia de descargas",
+  "Limpieza de aspas de condensador",
+  "Limpieza de sensores de temperatura de entrada y salida de aire",
+  "Medicion de temperatura de evaporador y condensador",
+  "Verificacion de paros y arranques del compresor",
+  "Verificacion de funcionamiento de termostato y ajuste de parametros",
+  "Verificacion de proteccion contra perdida de fase",
+  "Alineacion de poleas y pruebas de operacion",
+  "Engrasado de partes mecanicas y chumaceras",
+  "Cambio de filtros Celdek",
+  "Rutina especifica establecida en el anexo tecnico",
+];
+
 interface TorreWizardProps {
   type: 'preventivo' | 'diagnostico';
   sections: Section[];
@@ -973,7 +1660,7 @@ interface TorreWizardProps {
   defaultSectionId?: string;
 }
 
-function TorreWizard({ type, sections, currentUser, onCancel, initialData, defaultSectionId }: TorreWizardProps) {
+export function TorreWizard({ type, sections, currentUser, onCancel, initialData, defaultSectionId }: TorreWizardProps) {
   const [step, setStep] = useState(1);
   const [isSaving, setIsSaving] = useState(false);
   const [isGeneratingPDF, setIsGeneratingPDF] = useState(false);
@@ -1024,21 +1711,24 @@ function TorreWizard({ type, sections, currentUser, onCancel, initialData, defau
         condiciones: fd.condiciones.trim().slice(0, 100), trabajos: fd.trabajos.trim().slice(0, 1698),
         refacciones: fd.refacciones.trim().slice(0, 200),
         medicion: fd.medicion,
-        tecnico: fd.tecnico.trim().slice(0, 100),
+        tecnico: (fd.tecnico || currentUser.name || currentUser.username || '').trim().slice(0, 100),
         firmaCoordinador: fd.firmaCoordinador.trim().slice(0, 100),
         firmaVobo: fd.firmaVobo.trim().slice(0, 100),
         firmaAdministrador: fd.firmaAdministrador.trim().slice(0, 100),
         selloUnidad: fd.selloUnidad.trim().slice(0, 100),
         checklist1: fd.checklist1, checklist2: fd.checklist2,
         fotos: fd.fotos, sectionId: fd.sectionId,
-        jobId: currentUser.id, jobName: currentUser.name || currentUser.username,
+        jobId: currentUser.authUid || currentUser.id, jobName: currentUser.name || currentUser.username,
         updatedAt: now,
       };
       if (initialData?.id) {
         await updateDoc(doc(db, 'reports', initialData.id), docData);
+        await saveReportHistory({ reportId: initialData.id, serial: docData.serial, action: 'edited', actor: currentUser, changes: buildReportChanges(initialData as unknown as Record<string, unknown>, docData) });
         alert('Reporte actualizado correctamente.');
       } else {
-        await addDoc(collection(db, 'reports'), { ...docData, createdAt: now });
+        const reportRef = await addDoc(collection(db, 'reports'), { ...docData, createdAt: now });
+        await saveReportHistory({ reportId: reportRef.id, serial: docData.serial, action: 'created', actor: currentUser, changes: buildReportChanges(undefined, docData) });
+        await createReportNotification(reportRef.id, { serial: docData.serial, type: docData.type, client: docData.client }, currentUser);
         alert('Reporte guardado correctamente.');
       }
       onCancel();
@@ -1050,14 +1740,21 @@ function TorreWizard({ type, sections, currentUser, onCancel, initialData, defau
     if (!fd.serial.trim()) return alert('Ingresa el folio antes de generar el PDF.');
     setIsGeneratingPDF(true);
     try {
-      const excelBuffer = type === 'diagnostico'
-        ? await generarDiagnosticoTorreBuffer(fd)
-        : await generarMhosA0143Buffer(fd);
-      const blob = new Blob([excelBuffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+      const reportData = { ...fd, tecnico: (fd.tecnico || currentUser.name || currentUser.username || '').trim() };
       const form = new FormData();
-      form.append('file', blob, 'temp.xlsx');
-      alert('Generando PDF con LibreOffice… esto puede tomar unos segundos.');
-      const res = await fetch('/api/convert-to-pdf', { method: 'POST', body: form });
+      const xlsxType = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+      if (type === 'preventivo') {
+        const pageBuffers = await generarMhosA0143Buffers(reportData);
+        pageBuffers.forEach((buffer, index) => {
+          form.append('files', new Blob([buffer], { type: xlsxType }), `preventivo_${index + 1}.xlsx`);
+        });
+      } else {
+        const excelBuffer = await generarDiagnosticoTorreBuffer(reportData);
+        form.append('file', new Blob([excelBuffer], { type: xlsxType }), 'temp.xlsx');
+      }
+      const endpoint = type === 'preventivo' ? '/api/convert-preventivo' : '/api/convert-to-pdf';
+      alert('Generando PDF con LibreOfficeâ€¦ esto puede tomar unos segundos.');
+      const res = await fetch(endpoint, { method: 'POST', body: form });
       if (!res.ok) throw new Error('Conversión fallida');
       const pdfBlob = await res.blob();
       const url = URL.createObjectURL(pdfBlob);
@@ -1347,19 +2044,19 @@ function TorreWizard({ type, sections, currentUser, onCancel, initialData, defau
               {/* Checklist 1 */}
               <div>
                 <h3 className="font-bold pb-2 mb-4 text-lg" style={{ color: 'var(--text-primary)', borderBottom: '1px solid var(--border)' }}>Check List 1 (18 actividades)</h3>
-                <div className="grid grid-cols-2 md:grid-cols-3 gap-2 p-4 rounded-2xl" style={{ backgroundColor: 'var(--bg-secondary)', border: '1px solid var(--border)' }}>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 p-4 rounded-2xl" style={{ backgroundColor: 'var(--bg-secondary)', border: '1px solid var(--border)' }}>
                   {fd.checklist1.map((checked, i) => (
-                    <label key={i} className="flex items-center gap-2 p-2 rounded-lg cursor-pointer transition-all duration-200" style={{ border: '1px solid transparent' }}
+                    <label key={i} className="flex items-start gap-3 p-3 rounded-lg cursor-pointer transition-all duration-200" style={{ border: '1px solid transparent' }}
                       onMouseEnter={e => (e.currentTarget.style.borderColor = 'var(--border)')}
                       onMouseLeave={e => (e.currentTarget.style.borderColor = 'transparent')}>
-                      <div className="relative shrink-0">
+                      <div className="relative shrink-0 mt-0.5">
                         <input type="checkbox" checked={checked} onChange={e => { const n = [...fd.checklist1]; n[i] = e.target.checked; upd('checklist1', n); }} className="sr-only" />
                         <div className="w-5 h-5 rounded-md flex items-center justify-center transition-all duration-200"
                           style={{ backgroundColor: checked ? 'var(--success)' : 'transparent', border: `2px solid ${checked ? 'var(--success)' : 'var(--border-strong)'}` }}>
                           {checked && <svg className="w-3 h-3" viewBox="0 0 12 12" fill="none"><path d="M2 6l3 3 5-5" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></svg>}
                         </div>
                       </div>
-                      <span className="text-xs" style={{ color: checked ? 'var(--text-primary)' : 'var(--text-secondary)' }}>Actividad {i + 1}</span>
+                      <span className="text-xs leading-snug" style={{ color: checked ? 'var(--text-primary)' : 'var(--text-secondary)' }}>{PREVENTIVO_CHECKLIST_1[i] || `Actividad ${i + 1}`}</span>
                     </label>
                   ))}
                 </div>
@@ -1367,19 +2064,19 @@ function TorreWizard({ type, sections, currentUser, onCancel, initialData, defau
               {/* Checklist 2 */}
               <div>
                 <h3 className="font-bold pb-2 mb-4 text-lg" style={{ color: 'var(--text-primary)', borderBottom: '1px solid var(--border)' }}>Check List 2 (12 actividades)</h3>
-                <div className="grid grid-cols-2 md:grid-cols-3 gap-2 p-4 rounded-2xl" style={{ backgroundColor: 'var(--bg-secondary)', border: '1px solid var(--border)' }}>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 p-4 rounded-2xl" style={{ backgroundColor: 'var(--bg-secondary)', border: '1px solid var(--border)' }}>
                   {fd.checklist2.map((checked, i) => (
-                    <label key={i} className="flex items-center gap-2 p-2 rounded-lg cursor-pointer transition-all duration-200" style={{ border: '1px solid transparent' }}
+                    <label key={i} className="flex items-start gap-3 p-3 rounded-lg cursor-pointer transition-all duration-200" style={{ border: '1px solid transparent' }}
                       onMouseEnter={e => (e.currentTarget.style.borderColor = 'var(--border)')}
                       onMouseLeave={e => (e.currentTarget.style.borderColor = 'transparent')}>
-                      <div className="relative shrink-0">
+                      <div className="relative shrink-0 mt-0.5">
                         <input type="checkbox" checked={checked} onChange={e => { const n = [...fd.checklist2]; n[i] = e.target.checked; upd('checklist2', n); }} className="sr-only" />
                         <div className="w-5 h-5 rounded-md flex items-center justify-center transition-all duration-200"
                           style={{ backgroundColor: checked ? 'var(--success)' : 'transparent', border: `2px solid ${checked ? 'var(--success)' : 'var(--border-strong)'}` }}>
                           {checked && <svg className="w-3 h-3" viewBox="0 0 12 12" fill="none"><path d="M2 6l3 3 5-5" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" /></svg>}
                         </div>
                       </div>
-                      <span className="text-xs" style={{ color: checked ? 'var(--text-primary)' : 'var(--text-secondary)' }}>Actividad {i + 1}</span>
+                      <span className="text-xs leading-snug" style={{ color: checked ? 'var(--text-primary)' : 'var(--text-secondary)' }}>{PREVENTIVO_CHECKLIST_2[i] || `Actividad ${i + 1}`}</span>
                     </label>
                   ))}
                 </div>
@@ -1539,13 +2236,14 @@ function AdminJobWizard({ type, sections, currentUser, onCancel }: AdminJobWizar
       const serial = `MHOS-SSM-EL-${String(count).padStart(4, '0')}`;
       const finalReport = {
         serial, type: (type || 'preventivo').toLowerCase(),
-        jobId: currentUser.id, jobName: currentUser.name || currentUser.username,
+        jobId: currentUser.authUid || currentUser.id, jobName: currentUser.name || currentUser.username,
         date: new Date().toISOString().split('T')[0], createdAt: new Date().toISOString(),
         ...data
       };
-      await addDoc(collection(db, 'reports'), finalReport);
-      await generarExcel(finalReport);
-      alert(`¡Reporte Creado Exitosamente!\nFolio: ${serial}\nEl Excel se ha descargado.`);
+      const reportRef = await addDoc(collection(db, 'reports'), finalReport);
+      await saveReportHistory({ reportId: reportRef.id, serial, action: 'created', actor: currentUser, changes: buildReportChanges(undefined, finalReport) });
+      await createReportNotification(reportRef.id, { serial, type: finalReport.type, client: finalReport.client }, currentUser);
+      alert(`¡Reporte Creado Exitosamente!\nFolio: ${serial}`);
       onCancel();
     } catch (_err) { alert("Error al guardar en la nube. Intenta de nuevo."); }
     setIsSaving(false);
@@ -1729,7 +2427,7 @@ function AdminJobWizard({ type, sections, currentUser, onCancel }: AdminJobWizar
           <div className="animate-in fade-in space-y-5">
             <div className="p-4 rounded-xl" style={{ backgroundColor: 'var(--accent-light)', border: '1px solid var(--accent-border)' }}>
               <p className="text-sm font-medium" style={{ color: 'var(--accent)' }}>
-                Marca las casillas de las acciones que realizaste. En el Excel aparecerá automáticamente una &quot;X&quot; en negritas.
+                Marca las casillas de las acciones que realizaste. En el formato aparecerá automáticamente una &quot;X&quot; en negritas.
               </p>
             </div>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-2 p-5 rounded-2xl" style={{ backgroundColor: 'var(--bg-secondary)', border: '1px solid var(--border)' }}>
@@ -1776,7 +2474,7 @@ function AdminJobWizard({ type, sections, currentUser, onCancel }: AdminJobWizar
           <div className="space-y-5 animate-in fade-in">
             <div className="p-4 rounded-xl" style={{ backgroundColor: 'var(--warning-light)', border: '1px solid var(--warning)' }}>
               <h3 className="font-bold text-base mb-1" style={{ color: 'var(--warning)' }}>Evidencia Fotográfica</h3>
-              <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>Sube las fotos desde tu celular. El sistema las comprimirá y acomodará en la Página 3 del Excel.</p>
+              <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>Sube las fotos desde tu celular. El sistema las comprimirá y acomodará en la página de evidencia.</p>
             </div>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
               {[
@@ -1840,7 +2538,7 @@ function AdminJobWizard({ type, sections, currentUser, onCancel }: AdminJobWizar
             className="px-8 py-4 rounded-xl font-bold text-base flex items-center gap-2 transition-all duration-200"
             style={{ backgroundColor: 'var(--success)', color: '#fff', opacity: isSaving ? 0.7 : 1 }}
           >
-            {isSaving ? 'Guardando Reporte...' : <><Save className="w-5 h-5" /> Terminar y Descargar Excel</>}
+            {isSaving ? 'Guardando Reporte...' : <><Save className="w-5 h-5" /> Terminar y Guardar Reporte</>}
           </button>
         )}
       </div>

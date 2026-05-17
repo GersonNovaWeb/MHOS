@@ -6,15 +6,15 @@ import { collection, doc, getDoc, query, onSnapshot, orderBy, where, getDocs } f
 import { auth, db } from '../lib/firebase';
 import { Menu, Sun, Moon } from 'lucide-react';
 
-import { User, Section, Report, Message } from '../types';
+import { User, Section, Report, Message, AppNotification } from '../types';
 import LoginView from '../components/LoginView';
 import Sidebar from '../components/Sidebar';
 import AdminDashboard from '../components/AdminDashboard';
 import JobDashboard from '../components/JobDashboard';
+import ProfileSettings from '../components/ProfileSettings';
 
-// 🔴 MODO RESCATE ACTIVADO:
-// Forzará a que la cuenta que inicie sesión tenga permisos de Administrador absolutos.
-const FORZAR_ADMIN_SIEMPRE = true;
+// Modo rescate: usa NEXT_PUBLIC_FORCE_ADMIN=true solo si necesitas recuperar acceso admin.
+const FORZAR_ADMIN_SIEMPRE = process.env.NEXT_PUBLIC_FORCE_ADMIN === 'true';
 
 const TAB_LABELS: Record<string, string> = {
   buzon: 'Buzón de Reportes',
@@ -22,9 +22,46 @@ const TAB_LABELS: Record<string, string> = {
   usuarios: 'Usuarios y Accesos',
   chat: 'Chat con Jobs',
   hacer_reporte: 'Hacer Reporte',
+  notificaciones: 'Notificaciones',
+  metricas: 'Metricas',
+  respaldos: 'Respaldos',
   form: 'Formulario de Servicio',
   menu: 'Hacer Formatos',
+  perfil: 'Mi Perfil',
 };
+
+const normalizeText = (value: unknown) => String(value || '')
+  .trim()
+  .toLowerCase()
+  .normalize('NFD')
+  .replace(/[\u0300-\u036f]/g, '');
+
+const normalizeRole = (data: Record<string, unknown>, authEmail?: string | null): User['role'] => {
+  const roleText = normalizeText(data.role ?? data.rol ?? data.type ?? data.tipo);
+  const identityText = [data.name, data.username, authEmail].map(normalizeText).join(' ');
+
+  if (roleText.includes('admin') || roleText.includes('administrador') || identityText.includes('admin')) {
+    return 'admin';
+  }
+
+  return 'job';
+};
+
+const normalizeUserDoc = (id: string, data: Record<string, unknown>, authEmail?: string | null, authUid?: string | null): User => ({
+  id,
+  authUid: authUid || (typeof data.authUid === 'string' ? data.authUid : id),
+  ...(data as Omit<User, 'id' | 'role'>),
+  role: normalizeRole(data, authEmail),
+  name: String(data.name || authEmail?.split('@')[0] || 'Usuario'),
+  username: String(data.username || authEmail || ''),
+  password: typeof data.password === 'string' ? data.password : undefined,
+  nickname: typeof data.nickname === 'string' ? data.nickname : '',
+  phone: typeof data.phone === 'string' ? data.phone : '',
+  photoUrl: typeof data.photoUrl === 'string' ? data.photoUrl : '',
+  profileColor: typeof data.profileColor === 'string' ? data.profileColor : '',
+  canAccessReports: data.canAccessReports === true,
+  canManageSections: data.canManageSections === true,
+});
 
 export default function App() {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
@@ -37,20 +74,20 @@ export default function App() {
   const [sections, setSections] = useState<Section[]>([]);
   const [reports, setReports] = useState<Report[]>([]);
   const [messages, setMessages] = useState<Message[]>([]);
+  const [notifications, setNotifications] = useState<AppNotification[]>([]);
 
-  const [darkMode, setDarkMode] = useState(false);
+  const [darkMode, setDarkMode] = useState<boolean>(() => {
+    if (typeof window === 'undefined') return false;
+    return window.localStorage.getItem('darkMode') === 'true';
+  });
 
   useEffect(() => {
-    const saved = localStorage.getItem('darkMode') === 'true';
-    setDarkMode(saved);
-    document.documentElement.classList.toggle('dark', saved);
-  }, []);
+    window.localStorage.setItem('darkMode', String(darkMode));
+    document.documentElement.classList.toggle('dark', darkMode);
+  }, [darkMode]);
 
   const toggleDark = () => {
-    const next = !darkMode;
-    setDarkMode(next);
-    localStorage.setItem('darkMode', String(next));
-    document.documentElement.classList.toggle('dark', next);
+    setDarkMode(prev => !prev);
   };
 
   useEffect(() => {
@@ -78,27 +115,24 @@ export default function App() {
               ? userData
               : { name: 'Admin Maestro', username: firebaseUser.email, role: 'admin' };
 
-            let finalRole = safeUserData.role ? String(safeUserData.role).toLowerCase() : 'job';
+            const finalRole = FORZAR_ADMIN_SIEMPRE ? 'admin' : normalizeRole(safeUserData, firebaseUser.email);
+            const normalizedUser = normalizeUserDoc(docId, { ...safeUserData, role: finalRole }, firebaseUser.email, firebaseUser.uid);
 
-            if(FORZAR_ADMIN_SIEMPRE) {
-               finalRole = 'admin';
-            } else {
-               finalRole = finalRole === 'admin' ? 'admin' : 'job';
-            }
-
-            setCurrentUser({
-              id: docId,
-              name: String(safeUserData.name || firebaseUser.email?.split('@')[0] || 'Usuario'),
-              username: String(safeUserData.username || firebaseUser.email || ''),
-              role: finalRole as 'admin' | 'job'
-            });
+            setCurrentUser(normalizedUser);
             setActiveTab(finalRole === 'admin' ? 'buzon' : 'menu');
           } else {
             setCurrentUser({
               id: firebaseUser.uid,
+              authUid: firebaseUser.uid,
               name: firebaseUser.email?.split('@')[0] || 'Usuario',
               role: 'job',
-              username: firebaseUser.email || ''
+              username: firebaseUser.email || '',
+              nickname: '',
+              phone: '',
+              photoUrl: '',
+              profileColor: '',
+              canAccessReports: false,
+              canManageSections: false
             });
             setActiveTab('menu');
           }
@@ -116,23 +150,56 @@ export default function App() {
   useEffect(() => {
     if (!currentUser) return;
 
-    const unsubUsers = onSnapshot(query(collection(db, 'users')), (snapshot) => {
-      setUsers(snapshot.docs.map(d => ({ id: d.id, ...d.data() } as User)));
-    });
+    const unsubscribers: Array<() => void> = [];
+    const isAdmin = currentUser.role === 'admin';
+    const onDenied = (label: string, fallback: () => void) => (error: unknown) => {
+      console.warn('Listener de Firestore sin permiso:', label, error);
+      fallback();
+    };
 
-    const unsubSections = onSnapshot(query(collection(db, 'sections')), (snapshot) => {
-      setSections(snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Section)));
-    });
+    if (isAdmin) {
+      unsubscribers.push(onSnapshot(
+        query(collection(db, 'users')),
+        snapshot => setUsers(snapshot.docs.map(d => normalizeUserDoc(d.id, d.data() as Record<string, unknown>))),
+        onDenied('users', () => setUsers([currentUser]))
+      ));
+    } else {
+      unsubscribers.push(onSnapshot(
+        query(collection(db, 'users'), where('role', '==', 'admin')),
+        snapshot => setUsers([currentUser, ...snapshot.docs.map(d => normalizeUserDoc(d.id, d.data() as Record<string, unknown>))]),
+        onDenied('users-admin', () => setUsers([currentUser]))
+      ));
+    }
 
-    const unsubReports = onSnapshot(query(collection(db, 'reports'), orderBy('createdAt', 'desc')), (snapshot) => {
-      setReports(snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Report)));
-    });
+    unsubscribers.push(onSnapshot(
+      query(collection(db, 'sections')),
+      snapshot => setSections(snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Section))),
+      onDenied('sections', () => setSections([]))
+    ));
 
-    const unsubMessages = onSnapshot(query(collection(db, 'messages'), orderBy('createdAt', 'asc')), (snapshot) => {
-      setMessages(snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Message)));
-    });
+    unsubscribers.push(onSnapshot(
+      query(collection(db, 'reports'), orderBy('createdAt', 'desc')),
+      snapshot => setReports(snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Report))),
+      onDenied('reports', () => setReports([]))
+    ));
 
-    return () => { unsubUsers(); unsubSections(); unsubReports(); unsubMessages(); };
+    unsubscribers.push(onSnapshot(
+      query(collection(db, 'messages'), orderBy('createdAt', 'asc')),
+      snapshot => setMessages(snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Message))),
+      onDenied('messages', () => setMessages([]))
+    ));
+
+    if (isAdmin) {
+      unsubscribers.push(onSnapshot(
+        query(collection(db, 'notifications'), orderBy('createdAt', 'desc')),
+        snapshot => setNotifications(snapshot.docs.map(d => ({ id: d.id, ...d.data() } as AppNotification))),
+        onDenied('notifications', () => setNotifications([]))
+      ));
+    } else {
+      queueMicrotask(() => setNotifications([]));
+    }
+
+    return () => unsubscribers.forEach(unsubscribe => unsubscribe());
   }, [currentUser]);
 
   if (loadingAuth) return (
@@ -150,8 +217,15 @@ export default function App() {
   if (!currentUser) return <LoginView />;
 
   const currentTabLabel = TAB_LABELS[activeTab] || 'Panel';
-  const firstName = (currentUser.name || 'Usuario').split(' ')[0];
-  const initials = (currentUser.name || 'U').split(' ').map((w: string) => w[0]).slice(0, 2).join('').toUpperCase();
+  const displayName = currentUser.nickname || currentUser.name || 'Usuario';
+  const firstName = displayName.split(' ')[0];
+  const initials = (currentUser.name || currentUser.username || 'U').split(' ').filter(Boolean).map((w: string) => w[0]).slice(0, 2).join('').toUpperCase();
+  const profileColor = currentUser.profileColor || 'var(--accent)';
+  const workerAllowedAdminTabs: Array<'buzon' | 'secciones'> = [
+    ...(currentUser.canAccessReports ? ['buzon' as const] : []),
+    ...(currentUser.canManageSections ? ['secciones' as const] : []),
+  ];
+  const isWorkerAllowedAdminTab = currentUser.role !== 'admin' && workerAllowedAdminTabs.includes(activeTab as 'buzon' | 'secciones');
 
   return (
     <div className="min-h-screen flex overflow-hidden" style={{ backgroundColor: 'var(--bg-secondary)' }}>
@@ -214,17 +288,24 @@ export default function App() {
             </button>
 
             <div
-              className="w-9 h-9 rounded-full flex items-center justify-center font-bold text-sm text-white shrink-0"
-              style={{ backgroundColor: 'var(--accent)' }}
+              className="w-9 h-9 rounded-full flex items-center justify-center font-bold text-sm text-white shrink-0 overflow-hidden"
+              style={{ backgroundColor: profileColor }}
+              title={currentUser.name || 'Usuario'}
             >
-              {initials}
+              {currentUser.photoUrl ? (
+                <img src={currentUser.photoUrl} alt={currentUser.name || 'Foto de perfil'} className="w-full h-full object-cover" />
+              ) : (
+                initials
+              )}
             </div>
           </div>
         </header>
 
         <div className="flex-1 overflow-y-auto p-4 md:p-6">
           <div className="max-w-7xl mx-auto">
-            {currentUser.role === 'admin' ? (
+            {activeTab === 'perfil' ? (
+              <ProfileSettings currentUser={currentUser} setCurrentUser={setCurrentUser} />
+            ) : currentUser.role === 'admin' ? (
               <AdminDashboard
                 sections={sections}
                 reports={reports}
@@ -232,8 +313,23 @@ export default function App() {
                 setMessages={setMessages}
                 currentUser={currentUser}
                 users={users}
+                notifications={notifications}
                 activeTab={activeTab}
                 setActiveTab={setActiveTab}
+              />
+            ) : isWorkerAllowedAdminTab ? (
+              <AdminDashboard
+                sections={sections}
+                reports={reports}
+                messages={messages}
+                setMessages={setMessages}
+                currentUser={currentUser}
+                users={users}
+                notifications={notifications}
+                activeTab={activeTab}
+                setActiveTab={setActiveTab}
+                allowedTabs={workerAllowedAdminTabs}
+                canEditReports={false}
               />
             ) : (
               <JobDashboard

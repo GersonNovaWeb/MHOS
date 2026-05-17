@@ -1,0 +1,114 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function isMasterAdmin() {
+      return signedIn()
+        && request.auth.token.email in [
+          "deadmaster3000huju@gmail.com",
+          "admin@especialistas.com",
+          "adminmhos@especialistashavc.com"
+        ];
+    }
+
+    function hasUserProfile() {
+      return signedIn()
+        && exists(/databases/$(database)/documents/users/$(request.auth.uid));
+    }
+
+    function userProfile() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+
+    function isAdmin() {
+      return isMasterAdmin()
+        || (hasUserProfile() && userProfile().role == "admin");
+    }
+
+    function canAccessReports() {
+      return isAdmin()
+        || (hasUserProfile() && userProfile().canAccessReports == true);
+    }
+
+    function canManageSections() {
+      return isAdmin()
+        || (hasUserProfile() && userProfile().canManageSections == true);
+    }
+
+    function isOwnUserDoc(userId) {
+      return signedIn() && request.auth.uid == userId;
+    }
+
+    function isOwnUserEmail() {
+      return signedIn()
+        && resource.data.username == request.auth.token.email;
+    }
+
+    function isCreatingOwnUserDoc(userId) {
+      return signedIn()
+        && request.auth.uid == userId
+        && request.resource.data.username == request.auth.token.email
+        && request.resource.data.role == "job";
+    }
+
+    function onlyProfileFieldsChanged() {
+      return request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+        "name",
+        "nickname",
+        "phone",
+        "photoUrl",
+        "profileColor",
+        "updatedAt"
+      ]);
+    }
+
+    match /users/{userId} {
+      allow read: if isAdmin()
+        || isOwnUserDoc(userId)
+        || isOwnUserEmail()
+        || (signedIn() && resource.data.role == "admin");
+      allow create: if isAdmin() || isCreatingOwnUserDoc(userId);
+      allow delete: if isAdmin();
+      allow update: if isAdmin()
+        || ((isOwnUserDoc(userId) || isOwnUserEmail()) && onlyProfileFieldsChanged());
+    }
+
+    match /sections/{sectionId} {
+      allow read: if signedIn();
+      allow create, update, delete: if canManageSections();
+    }
+
+    match /reports/{reportId} {
+      allow read: if signedIn();
+      allow create: if signedIn()
+        && (request.resource.data.jobId == request.auth.uid || request.resource.data.jobUid == request.auth.uid);
+      allow update, delete: if isAdmin();
+    }
+
+    match /reportHistory/{historyId} {
+      allow read: if canAccessReports();
+      allow create: if signedIn();
+      allow update, delete: if false;
+    }
+
+    match /notifications/{notificationId} {
+      allow read: if isAdmin();
+      allow create: if signedIn();
+      allow update: if isAdmin();
+      allow delete: if isAdmin();
+    }
+
+    match /messages/{messageId} {
+      allow read, create: if signedIn();
+      allow update, delete: if isAdmin();
+    }
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

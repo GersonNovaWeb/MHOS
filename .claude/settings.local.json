@@ -15,7 +15,8 @@
       "Bash(git commit *)",
       "Bash(pip install *)",
       "Bash(python -c \"from pypdf import PdfWriter; print\\('pypdf OK'\\)\")",
-      "Bash(python -c \"from openpyxl import load_workbook; print\\('openpyxl OK'\\)\")"
+      "Bash(python -c \"from openpyxl import load_workbook; print\\('openpyxl OK'\\)\")",
+      "PowerShell(& \"C:\\\\Program Files\\\\LibreOffice\\\\program\\\\soffice.exe\" --headless --convert-to pdf \"C:\\\\Users\\\\ger_s\\\\OneDrive\\\\Desktop\\\\Report_MHOS - copia \\(2\\)\\\\public\\\\templates\\\\Formato_Preventivo.xlsx\" --outdir \"$env:TEMP\" 2>&1)"
     ]
   }
 }

@@ -1,7 +1,7 @@
 'use client';
 
 const isProd = process.env.NODE_ENV === 'production';
-const base = isProd ? '/Report_MHOS' : '';
+const base = '';
 
 // ── Constantes de color ───────────────────────────────────────────────────────
 const C_GREEN = [26,  127, 55 ];

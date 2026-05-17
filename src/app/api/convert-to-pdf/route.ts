@@ -23,9 +23,9 @@ export async function POST(req: NextRequest) {
     await writeFile(xlsxPath, Buffer.from(await file.arrayBuffer()));
     await mkdir(profileDir, { recursive: true });
 
-    const loPath = process.platform === 'win32'
+    const loPath = process.env.LIBREOFFICE_BIN || (process.platform === 'win32'
       ? 'C:\\Program Files\\LibreOffice\\program\\soffice.exe'
-      : 'libreoffice';
+      : 'libreoffice');
 
     const profileUrl = process.platform === 'win32'
       ? `file:///${profileDir.replace(/\\/g, '/')}`

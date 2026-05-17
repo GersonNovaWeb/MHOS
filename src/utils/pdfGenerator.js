@@ -1,4 +1,4 @@
-import { generarExcelBuffer, generarDiagnosticoTorreBuffer, generarMhosA0143Buffer } from './excelGenerator';
+import { generarExcelBuffer, generarDiagnosticoTorreBuffer, generarMhosA0143Buffers } from './excelGenerator';
 
 export const generarPDF = async (reportData) => {
   try {
@@ -8,18 +8,20 @@ export const generarPDF = async (reportData) => {
     const saveAs = FileSaver.saveAs || FileSaver.default?.saveAs || FileSaver.default;
 
     const tipoReporte = (reportData.type || '').toLowerCase();
-    const isPreventivo = tipoReporte === 'preventivo';
     const xlsxType = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 
-    const excelBuffer =
-      tipoReporte === 'diagnostico'
-        ? await generarDiagnosticoTorreBuffer(reportData)
-        : tipoReporte === 'preventivo'
-        ? await generarMhosA0143Buffer(reportData)
-        : await generarExcelBuffer(reportData);
-
     const form = new FormData();
-    form.append('file', new Blob([excelBuffer], { type: xlsxType }), 'reporte.xlsx');
+    if (tipoReporte === 'preventivo') {
+      const pageBuffers = await generarMhosA0143Buffers(reportData);
+      pageBuffers.forEach((buffer, index) => {
+        form.append('files', new Blob([buffer], { type: xlsxType }), `preventivo_${index + 1}.xlsx`);
+      });
+    } else {
+      const excelBuffer = tipoReporte === 'diagnostico'
+        ? await generarDiagnosticoTorreBuffer(reportData)
+        : await generarExcelBuffer(reportData);
+      form.append('file', new Blob([excelBuffer], { type: xlsxType }), 'reporte.xlsx');
+    }
 
     alert('Generando PDF... Esto puede tomar unos segundos.');
 
